@@ -7,15 +7,16 @@ import type { ActionResult } from "@/lib/action-result";
 import { APPLIED_STATUSES, JOB_STATUS_VALUES, type JobStatus } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { companies, jobNotes, jobs } from "@/lib/db/schema";
+import { parseLocation } from "@/lib/geo";
 import { importJobFromUrl, type ImportResult } from "@/lib/import";
 import { fromDateInput, normalizeUrl } from "@/lib/utils";
 import { findJobByUrl } from "./queries";
 import { jobFormSchema, parseSkills, type JobFormValues } from "./schema";
 
-
 function revalidateJobs(id?: string) {
   revalidatePath("/dashboard");
   revalidatePath("/jobs");
+  revalidatePath("/map");
   if (id) revalidatePath(`/jobs/${id}`);
 }
 
@@ -44,7 +45,13 @@ function toRow(values: JobFormValues) {
       ? "applied"
       : values.status;
   const postedAt = values.postedAt ? new Date(values.postedAt) : null;
+  const loc = parseLocation(values.location);
+  const place = loc.places[0];
   return {
+    lat: place?.lat ?? null,
+    lng: place?.lng ?? null,
+    place: place?.label ?? (values.location ? "" : null),
+    remote: loc.remote || values.workplace === "remote",
     title: values.title,
     location: values.location || null,
     workplace: values.workplace || null,

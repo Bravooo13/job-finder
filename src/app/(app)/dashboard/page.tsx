@@ -1,15 +1,16 @@
-import { CalendarClock, FileText, Link2, Plus } from "lucide-react";
+import { CalendarClock, Inbox, Link2, Plus, Radar } from "lucide-react";
 import Link from "next/link";
 import { ApplicationCalendar, StatusDonut, WeeklyChart } from "@/components/dashboard/charts";
 import { JobFormDialog } from "@/components/jobs/JobFormDialog";
 import { JobStatusBadge } from "@/components/jobs/JobStatus";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { NewResumeDialog } from "@/components/profile/NewResumeDialog";
+import { ImportResumeButton } from "@/components/profile/ImportResumeButton";
+import { ScoreBadge } from "@/components/found/FoundList";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardData } from "@/lib/dashboard/queries";
 import { listCompanyNames, listResumeOptions } from "@/lib/jobs/queries";
-import { listJobOptions } from "@/lib/resumes/queries";
+import { foundCounts, listFound, listSearches } from "@/lib/search/queries";
 import { formatDate, timeAgo } from "@/lib/utils";
 
 export const metadata = { title: "Dashboard" };
@@ -28,14 +29,16 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 }
 
 export default async function DashboardPage() {
-  const [data, companyNames, resumes, jobOptions] = await Promise.all([
+  const [data, companyNames, resumes, found, counts, searches] = await Promise.all([
     getDashboardData(),
     listCompanyNames(),
     listResumeOptions(),
-    listJobOptions(),
+    listFound({ status: "new", limit: 6 }),
+    foundCounts(),
+    listSearches(),
   ]);
   const { totals } = data;
-  const isEmpty = totals.tracked === 0;
+  const isEmpty = totals.tracked === 0 && searches.length === 0;
 
   return (
     <>
@@ -73,20 +76,62 @@ export default async function DashboardPage() {
             <div>
               <p className="font-semibold">Welcome to Job Finder</p>
               <p className="text-sm text-muted-foreground">
-                Start by setting up your master profile, then add the jobs you&apos;re looking at.
+                {totals.resumes === 0
+                  ? "Import your resume first. Then set up a search and Job Finder finds jobs that fit it."
+                  : "Next, set up a search. It checks thousands of company job boards for jobs that fit your resume."}
               </p>
             </div>
             {totals.resumes === 0 ? (
-              <NewResumeDialog
-                resumes={[]}
-                jobs={jobOptions}
-                trigger={
-                  <Button>
-                    <FileText /> Create master profile
-                  </Button>
-                }
-              />
-            ) : null}
+              <ImportResumeButton variant="default" />
+            ) : (
+              <Button asChild>
+                <Link href="/searches/new">
+                  <Radar /> New search
+                </Link>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {found.total || searches.length ? (
+        <Card className="mb-6">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div>
+              <CardTitle className="text-base">New jobs found for you</CardTitle>
+              <CardDescription>
+                {(counts.new ?? 0).toLocaleString()} to review · {(counts.saved ?? 0).toLocaleString()} saved
+                {searches.some((s) => s.running) ? " · a search is running now" : ""}
+              </CardDescription>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/found">
+                <Inbox /> Review all
+              </Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {found.rows.length ? (
+              <ul className="grid gap-x-6 md:grid-cols-2">
+                {found.rows.map((j) => (
+                  <li key={j.id} className="flex items-center gap-3 border-b py-2.5 last:border-b-0 md:[&:nth-last-child(2)]:border-b-0">
+                    <ScoreBadge score={j.score} className="h-8 w-10" />
+                    <div className="min-w-0">
+                      <a href={j.url} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium hover:underline">
+                        {j.title}
+                      </a>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {j.company} · {j.place || j.location || "Location not listed"}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Nothing new right now. <Link href="/searches" className="text-primary hover:underline">Run a search</Link> to look again.
+              </p>
+            )}
           </CardContent>
         </Card>
       ) : null}

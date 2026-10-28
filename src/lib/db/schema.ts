@@ -2,8 +2,10 @@ import { relations, sql } from "drizzle-orm";
 import {
   index,
   integer,
+  real,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 const id = () =>
@@ -64,6 +66,11 @@ export const jobs = sqliteTable(
     postedAt: integer("posted_at", { mode: "timestamp_ms" }),
     dateApplied: integer("date_applied", { mode: "timestamp_ms" }),
     dueDate: integer("due_date", { mode: "timestamp_ms" }),
+    // Where the job is, for the map. Filled from `location` when saved.
+    lat: real("lat"),
+    lng: real("lng"),
+    place: text("place"),
+    remote: integer("remote", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -105,6 +112,8 @@ export const resumes = sqliteTable("resumes", {
   linkedin: text("linkedin"),
   github: text("github"),
   summary: text("summary"),
+  // Full text of an imported resume file, used as extra matching keywords.
+  sourceText: text("source_text"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -145,6 +154,119 @@ export const resumeSkillGroups = sqliteTable("resume_skill_groups", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+// ---------------------------------------------------------------- searches
+
+// A saved search runs across company job boards and collects matching jobs.
+export const searches = sqliteTable("searches", {
+  id: id(),
+  name: text("name").notNull(),
+  titles: text("titles", { mode: "json" }).$type<string[]>().notNull(),
+  keywords: text("keywords", { mode: "json" }).$type<string[]>().notNull(),
+  excludeWords: text("exclude_words", { mode: "json" }).$type<string[]>().notNull(),
+  locations: text("locations", { mode: "json" }).$type<string[]>().notNull(),
+  includeRemote: integer("include_remote", { mode: "boolean" }).notNull().default(true),
+  levels: text("levels", { mode: "json" }).$type<string[]>().notNull(), // internship | entry | any
+  sources: text("sources", { mode: "json" }).$type<string[]>().notNull(), // greenhouse | lever | ashby | workday
+  companyScope: text("company_scope").notNull().default("all"), // all | mine
+  resumeId: text("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+  minScore: integer("min_score").notNull().default(45),
+  scheduleHour: integer("schedule_hour"), // local hour 0-23, null = only when you press Run
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  lastRunAt: integer("last_run_at", { mode: "timestamp_ms" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const searchRuns = sqliteTable(
+  "search_runs",
+  {
+    id: id(),
+    searchId: text("search_id")
+      .notNull()
+      .references(() => searches.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("running"), // running | done | failed | stopped
+    trigger: text("trigger").notNull().default("manual"), // manual | schedule
+    boardsTotal: integer("boards_total").notNull().default(0),
+    boardsDone: integer("boards_done").notNull().default(0),
+    postingsSeen: integer("postings_seen").notNull().default(0),
+    matched: integer("matched").notNull().default(0),
+    newJobs: integer("new_jobs").notNull().default(0),
+    errors: text("errors", { mode: "json" }).$type<{ board: string; error: string }[]>().notNull(),
+    message: text("message"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [index("search_runs_search_idx").on(t.searchId, t.startedAt)],
+);
+
+export interface MatchReasons {
+  title?: string; // which target title matched
+  level?: string; // "Internship", "Entry level"
+  keywords: string[]; // your skills the posting mentions
+  location?: string; // "Chicago area", "Remote (US)", "United States"
+  experienceYears?: number; // "3+ years" found in the posting
+}
+
+// Jobs found by searches, waiting for you to save or dismiss them.
+export const discoveredJobs = sqliteTable(
+  "discovered_jobs",
+  {
+    id: id(),
+    searchId: text("search_id").references(() => searches.id, { onDelete: "set null" }),
+    url: text("url").notNull(),
+    provider: text("provider").notNull(),
+    boardToken: text("board_token").notNull(),
+    company: text("company").notNull(),
+    title: text("title").notNull(),
+    location: text("location"),
+    workplace: text("workplace"),
+    jobType: text("job_type"),
+    salary: text("salary"),
+    description: text("description"),
+    postedAt: integer("posted_at", { mode: "timestamp_ms" }),
+    score: integer("score").notNull().default(0),
+    reasons: text("reasons", { mode: "json" }).$type<MatchReasons>().notNull(),
+    flags: text("flags", { mode: "json" }).$type<string[]>().notNull(), // no_sponsorship | citizenship | senior
+    status: text("status").notNull().default("new"), // new | saved | dismissed
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    lat: real("lat"),
+    lng: real("lng"),
+    place: text("place"),
+    remote: integer("remote", { mode: "boolean" }).notNull().default(false),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("discovered_url_idx").on(t.url),
+    index("discovered_status_idx").on(t.status, t.score),
+    index("discovered_search_idx").on(t.searchId),
+  ],
+);
+
+// Company job boards you added yourself (the built-in directory lives in
+// src/lib/boards/directory/*.json).
+export const companyBoards = sqliteTable(
+  "company_boards",
+  {
+    id: id(),
+    provider: text("provider").notNull(), // greenhouse | lever | ashby | workday
+    token: text("token").notNull(), // board slug, or Workday tenant
+    name: text("name").notNull(),
+    host: text("host"), // Lever "eu", or Workday host like acme.wd5.myworkdayjobs.com
+    site: text("site").notNull().default(""), // Workday career site name ("" for other boards)
+    careersUrl: text("careers_url"),
+    jobCount: integer("job_count"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("company_boards_key_idx").on(t.provider, t.token, t.site)],
+);
 
 // ---------------------------------------------------------------- relations
 
@@ -187,6 +309,14 @@ export const resumeSkillGroupsRelations = relations(
   }),
 );
 
+export const searchesRelations = relations(searches, ({ many }) => ({
+  runs: many(searchRuns),
+}));
+
+export const searchRunsRelations = relations(searchRuns, ({ one }) => ({
+  search: one(searches, { fields: [searchRuns.searchId], references: [searches.id] }),
+}));
+
 export type Company = typeof companies.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type NewJob = typeof jobs.$inferInsert;
@@ -194,3 +324,7 @@ export type JobNote = typeof jobNotes.$inferSelect;
 export type Resume = typeof resumes.$inferSelect;
 export type ResumeEntry = typeof resumeEntries.$inferSelect;
 export type ResumeSkillGroup = typeof resumeSkillGroups.$inferSelect;
+export type Search = typeof searches.$inferSelect;
+export type SearchRun = typeof searchRuns.$inferSelect;
+export type DiscoveredJob = typeof discoveredJobs.$inferSelect;
+export type CompanyBoard = typeof companyBoards.$inferSelect;

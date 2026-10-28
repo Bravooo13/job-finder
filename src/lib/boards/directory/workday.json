@@ -1,0 +1,116 @@
+[
+  {
+    "name": "Abbott",
+    "token": "abbott",
+    "host": "abbott.wd5.myworkdayjobs.com",
+    "site": "abbottcareers"
+  },
+  {
+    "name": "Allstate",
+    "token": "allstate",
+    "host": "allstate.wd5.myworkdayjobs.com",
+    "site": "allstate_careers"
+  },
+  {
+    "name": "Baxter",
+    "token": "baxter",
+    "host": "baxter.wd1.myworkdayjobs.com",
+    "site": "baxter"
+  },
+  {
+    "name": "BMO",
+    "token": "bmo",
+    "host": "bmo.wd3.myworkdayjobs.com",
+    "site": "External"
+  },
+  {
+    "name": "Boeing",
+    "token": "boeing",
+    "host": "boeing.wd1.myworkdayjobs.com",
+    "site": "EXTERNAL_CAREERS"
+  },
+  {
+    "name": "Capital One",
+    "token": "capitalone",
+    "host": "capitalone.wd12.myworkdayjobs.com",
+    "site": "Capital_One"
+  },
+  {
+    "name": "Citi",
+    "token": "citi",
+    "host": "citi.wd5.myworkdayjobs.com",
+    "site": "2"
+  },
+  {
+    "name": "CME Group",
+    "token": "cmegroup",
+    "host": "cmegroup.wd1.myworkdayjobs.com",
+    "site": "cme_careers"
+  },
+  {
+    "name": "Compass Lexecon",
+    "token": "fticonsulting",
+    "host": "fticonsulting.wd108.myworkdayjobs.com",
+    "site": "CompassLexeconCareers"
+  },
+  {
+    "name": "Cornerstone Research",
+    "token": "cornerstone",
+    "host": "cornerstone.wd501.myworkdayjobs.com",
+    "site": "CornerstoneResearch_Careers"
+  },
+  {
+    "name": "Guidehouse",
+    "token": "guidehouse",
+    "host": "guidehouse.wd1.myworkdayjobs.com",
+    "site": "External"
+  },
+  {
+    "name": "Huron",
+    "token": "huron",
+    "host": "huron.wd1.myworkdayjobs.com",
+    "site": "huroncareers"
+  },
+  {
+    "name": "Marsh McLennan (Oliver Wyman, NERA, Mercer)",
+    "token": "mmc",
+    "host": "mmc.wd1.myworkdayjobs.com",
+    "site": "MMC"
+  },
+  {
+    "name": "Motorola Solutions",
+    "token": "motorolasolutions",
+    "host": "motorolasolutions.wd5.myworkdayjobs.com",
+    "site": "Careers"
+  },
+  {
+    "name": "Nasdaq",
+    "token": "nasdaq",
+    "host": "nasdaq.wd1.myworkdayjobs.com",
+    "site": "Global_External_Site"
+  },
+  {
+    "name": "Northern Trust",
+    "token": "ntrs",
+    "host": "ntrs.wd1.myworkdayjobs.com",
+    "site": "northerntrust"
+  },
+  {
+    "name": "S&P Global",
+    "token": "spgi",
+    "host": "spgi.wd5.myworkdayjobs.com",
+    "site": "SPGI_Careers"
+  },
+  {
+    "name": "State Street",
+    "token": "statestreet",
+    "host": "statestreet.wd1.myworkdayjobs.com",
+    "site": "Global"
+  },
+  {
+    "name": "Zebra Technologies",
+    "token": "zebra",
+    "host": "zebra.wd501.myworkdayjobs.com",
+    "site": "Zebra_careers"
+  }
+]

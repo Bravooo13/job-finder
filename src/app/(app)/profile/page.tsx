@@ -1,6 +1,7 @@
 import { Copy, Crown, FileText, Plus, Target } from "lucide-react";
 import Link from "next/link";
 import { EmptyState, PageHeader } from "@/components/layout/PageHeader";
+import { ImportResumeButton } from "@/components/profile/ImportResumeButton";
 import { NewResumeDialog } from "@/components/profile/NewResumeDialog";
 import { ResumeActions } from "@/components/profile/ResumeActions";
 import { Badge } from "@/components/ui/badge";
@@ -33,14 +34,26 @@ export default async function ProfilePage() {
       <PageHeader
         title="Profile & resumes"
         description="Keep everything in your master profile, then make a trimmed, tailored copy for each job."
-        actions={resumes.length ? newButton : undefined}
+        actions={
+          resumes.length ? (
+            <>
+              <ImportResumeButton />
+              {newButton}
+            </>
+          ) : undefined
+        }
       />
       {resumes.length === 0 ? (
         <EmptyState
           icon={<FileText className="size-8" />}
           title="Start with your master profile"
-          description="Add all your experience, education, projects and skills once. Every tailored resume starts as a copy of it."
-          action={newButton}
+          description="Import your resume (PDF or Word) and Job Finder fills in your experience, education, projects and skills. Or type it in yourself. Every tailored resume starts as a copy of it."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              <ImportResumeButton variant="default" />
+              {newButton}
+            </div>
+          }
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

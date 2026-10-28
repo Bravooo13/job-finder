@@ -1,14 +1,30 @@
 # Third-party notices
 
-Job Finder includes code adapted from the following project.
+Job Finder includes code and data from the following projects.
+
+## GeoNames
+
+- Source: https://www.geonames.org/, via the
+  [all-the-cities](https://github.com/zeke/all-the-cities) package (MIT)
+- Used for: `src/lib/geo/cities.json`, the offline city list that places jobs
+  on the map (built by `scripts/build-cities.cjs`)
+- License: [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+## Map tiles
+
+The map shows tiles from [CARTO](https://carto.com/attributions) based on
+[OpenStreetMap](https://www.openstreetmap.org/copyright) data, credited on the
+map itself.
 
 ## JobSync
 
 - Source: https://github.com/Gsync/jobsync
 - Used for: the UI components in `src/components/ui/` (built on shadcn/ui), the
   base theme in `src/app/globals.css`, HTML entity decoding in
-  `src/lib/import/html.ts`, and the approach for reading Lever and Ashby job
-  feeds in `src/lib/import/providers.ts`.
+  `src/lib/import/html.ts`, the approach for reading Lever and Ashby job feeds
+  in `src/lib/import/providers.ts` and `src/lib/boards/adapters.ts`, and the
+  company board lists in `src/lib/boards/directory/greenhouse.json`,
+  `lever.json` and `ashby.json`.
 
 ```
 MIT License
