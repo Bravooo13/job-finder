@@ -1,8 +1,10 @@
 import "server-only";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import { ADAPTERS } from "@/lib/boards/adapters";
+import { ADAPTERS, SIMPLIFY_LISTS, cleanJobUrl } from "@/lib/boards/adapters";
 import { directoryBoards } from "@/lib/boards/directory";
 import { mapLimit } from "@/lib/boards/http";
+import { learnBoards } from "@/lib/boards/learn";
+import { CLASS_VERSION, classifyJob } from "@/lib/classify";
 import { boardKey, PROVIDER_LABELS, type BoardRef, type Posting, type Provider } from "@/lib/boards/types";
 import { db } from "@/lib/db";
 import {
@@ -19,6 +21,8 @@ import { createMatcher, searchQueries, type Level, type MatchResult } from "./ma
 const BOARD_CONCURRENCY = 8;
 const DETAIL_CONCURRENCY = 4;
 const MAX_DETAILS_PER_BOARD = 40;
+// The Simplify lists hold thousands of jobs from many companies in one "board".
+const MAX_DETAILS: Partial<Record<Provider, number>> = { simplify: 250 };
 
 // Running searches, so a run can be stopped and two runs of one search can't overlap.
 const globalForRuns = globalThis as unknown as {
@@ -48,7 +52,8 @@ export async function boardsForSearch(search: Pick<Search, "sources" | "companyS
     host: b.host ?? undefined,
     site: b.site || undefined,
   }));
-  const all = search.companyScope === "mine" ? mine : [...mine, ...directoryBoards()];
+  const lists: BoardRef[] = SIMPLIFY_LISTS.map((l) => ({ provider: "simplify", token: l.token, name: l.name }));
+  const all = search.companyScope === "mine" ? mine : [...lists, ...mine, ...directoryBoards()];
   const seen = new Set<string>();
   return all.filter((b) => {
     const key = boardKey(b);
@@ -58,7 +63,7 @@ export async function boardsForSearch(search: Pick<Search, "sources" | "companyS
   });
 }
 
-async function searchKeywords(search: Search): Promise<string[]> {
+export async function searchKeywords(search: Search): Promise<string[]> {
   const words = [...search.keywords];
   if (search.resumeId) {
     const groups = await db
@@ -137,7 +142,12 @@ async function executeRun(search: Search, runId: string, signal: AbortSignal) {
         progress.postingsSeen += postings.length;
         const candidates = postings.filter((p) => matcher.prefilter(p.title, p.location));
 
-        const toDetail = adapter.detail ? candidates.slice(0, MAX_DETAILS_PER_BOARD) : [];
+        if (board.provider === "simplify" && candidates.length) {
+          // Remember the company boards behind relevant listings for later searches.
+          await learnBoards(candidates.map((p) => ({ url: p.url, company: p.company })), "simplify").catch(() => 0);
+        }
+        const limit = MAX_DETAILS[board.provider] ?? MAX_DETAILS_PER_BOARD;
+        const toDetail = adapter.detail ? candidates.slice(0, limit) : [];
         if (adapter.detail && toDetail.length) {
           await mapLimit(
             toDetail,
@@ -196,6 +206,7 @@ async function executeRun(search: Search, runId: string, signal: AbortSignal) {
 
 /** Inserts new finds and refreshes ones seen before. Returns how many were new. */
 async function saveFound(searchId: string, found: Found[]): Promise<number> {
+  for (const f of found) f.posting.url = cleanJobUrl(f.posting.url);
   const urls = found.map((f) => f.posting.url);
   const [existing, tracked] = await Promise.all([
     db
@@ -214,6 +225,18 @@ async function saveFound(searchId: string, found: Found[]): Promise<number> {
 
   for (const { posting: p, result } of found) {
     const place = result.place ?? result.location.places[0];
+    const remote = result.location.remote;
+    const c = classifyJob({
+      title: p.title,
+      company: p.company,
+      description: p.description,
+      location: p.location,
+      place: place?.label,
+      remote,
+      sourceIndustry: p.sourceIndustry,
+      visaHint: p.visaHint,
+      category: p.category,
+    });
     const values = {
       title: p.title,
       company: p.company,
@@ -229,7 +252,17 @@ async function saveFound(searchId: string, found: Found[]): Promise<number> {
       lat: place?.lat ?? null,
       lng: place?.lng ?? null,
       place: place?.label ?? null,
-      remote: result.location.remote,
+      remote,
+      industry: c.industry,
+      roleType: c.roleType,
+      visa: c.visa,
+      visaNote: c.visaNote,
+      level: c.level,
+      state: c.state,
+      companyKey: c.companyKey,
+      classVersion: CLASS_VERSION,
+      sourceIndustry: p.sourceIndustry ?? null,
+      applyUrl: p.applyUrl ?? null,
       lastSeenAt: now,
     };
     const existingId = existingByUrl.get(p.url);

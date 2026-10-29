@@ -19,7 +19,8 @@ export function boardsInText(text: string): Omit<BoardRef, "name">[] {
   const add = (b: Omit<BoardRef, "name">) => {
     const token = b.token.toLowerCase();
     if (!token || ["embed", "v1", "api", "jobs", "boards"].includes(token)) return;
-    found.set(`${b.provider}:${token}:${b.site ?? ""}`, { ...b, token: b.provider === "workday" ? b.token : token });
+    const keepCase = b.provider === "workday" || b.provider === "smartrecruiters";
+    found.set(`${b.provider}:${token}:${b.site ?? ""}`, { ...b, token: keepCase ? b.token : token });
   };
   for (const m of text.matchAll(/(?:job-boards|boards)(?:\.eu)?\.greenhouse\.io\/(?:embed\/job_board\?for=)?([a-z0-9_-]+)/gi)) {
     add({ provider: "greenhouse", token: m[1] });
@@ -41,6 +42,13 @@ export function boardsInText(text: string): Omit<BoardRef, "name">[] {
   )) {
     if (["wday", "job", "details"].includes(m[3])) continue;
     add({ provider: "workday", token: m[1], host: `${m[1]}.${m[2]}.myworkdayjobs.com`, site: m[3] });
+  }
+  for (const m of text.matchAll(/(?:jobs|careers)\.smartrecruiters\.com\/([A-Za-z0-9_-]+)/g)) {
+    if (["oneclick-ui", "sr-jobs", "jobs"].includes(m[1].toLowerCase())) continue;
+    add({ provider: "smartrecruiters", token: m[1] });
+  }
+  for (const m of text.matchAll(/api\.smartrecruiters\.com\/v1\/companies\/([A-Za-z0-9_-]+)/g)) {
+    add({ provider: "smartrecruiters", token: m[1] });
   }
   for (const m of text.matchAll(/(wd\d+)\.myworkdaysite\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?recruiting\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)/g)) {
     add({ provider: "workday", token: m[2], host: `${m[1]}.myworkdaysite.com`, site: m[3] });
@@ -130,6 +138,19 @@ export async function verifyBoard(b: Omit<BoardRef, "name"> & { name?: string })
         careersUrl: `https://jobs.ashbyhq.com/${b.token}`,
       };
     }
+    if (b.provider === "smartrecruiters") {
+      const data = await getJson<{ totalFound?: number; content?: { company?: { name?: string } }[] }>(
+        `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(b.token)}/postings?limit=1`,
+        { timeoutMs: 15_000 },
+      );
+      if (typeof data.totalFound !== "number" || data.totalFound === 0) return null;
+      return {
+        ...b,
+        name: data.content?.[0]?.company?.name || b.name || prettify(b.token),
+        jobCount: data.totalFound,
+        careersUrl: `https://jobs.smartrecruiters.com/${b.token}`,
+      };
+    }
     if (b.provider === "workday" && b.host && b.site) {
       const data = await getJson<{ total?: number }>(
         `https://${b.host}/wday/cxs/${b.token}/${b.site}/jobs`,
@@ -200,11 +221,13 @@ export async function findBoards(input: string): Promise<FoundBoard[]> {
       candidates.push({ provider: "lever", token: slug });
       candidates.push({ provider: "ashby", token: slug });
     }
+    const srToken = text.replace(/\b(inc|llc|ltd|corp|corporation|co|company)\b\.?/gi, "").replace(/[^A-Za-z0-9]/g, "");
+    if (srToken) candidates.unshift({ provider: "smartrecruiters", token: srToken });
     candidates.push(...(await guessWorkday(slugs.slice(0, 2))));
   }
 
   const name = looksLikeUrl ? undefined : text;
-  const verified = await Promise.all(candidates.slice(0, 18).map((c) => verifyBoard({ ...c, name })));
+  const verified = await Promise.all(candidates.slice(0, 20).map((c) => verifyBoard({ ...c, name })));
   const seen = new Set<string>();
   return verified.filter((b): b is FoundBoard => {
     if (!b) return false;

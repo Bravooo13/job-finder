@@ -6,7 +6,9 @@ import { FoundList } from "@/components/found/FoundList";
 import { EmptyState, PageHeader } from "@/components/layout/PageHeader";
 import { AutoRefresh } from "@/components/searches/RunControls";
 import { Button } from "@/components/ui/button";
-import { foundCounts, listFound, listSearchOptions, listSearches } from "@/lib/search/queries";
+import { filtersFromParams, paramsFromRecord } from "@/lib/found/filters";
+import { foundFacets, listFound } from "@/lib/found/queries";
+import { foundCounts, listSearchOptions, listSearches } from "@/lib/search/queries";
 
 export const metadata = { title: "Found jobs" };
 export const dynamic = "force-dynamic";
@@ -15,20 +17,14 @@ type Params = Record<string, string | string[] | undefined>;
 
 export default async function FoundPage({ searchParams }: { searchParams: Promise<Params> }) {
   const p = await searchParams;
-  const get = (k: string) => (Array.isArray(p[k]) ? p[k]![0] : p[k]) as string | undefined;
+  const filters = filtersFromParams(paramsFromRecord(p));
   const [{ rows, total }, counts, searchOptions, searches] = await Promise.all([
-    listFound({
-      status: get("status") ?? "new",
-      searchId: get("search"),
-      minScore: get("min") ? Number(get("min")) : undefined,
-      hideNoSponsorship: get("sponsor") === "1",
-      q: get("q"),
-      sort: (get("sort") as "score" | "newest" | "posted") ?? "score",
-    }),
+    listFound(filters),
     foundCounts(),
     listSearchOptions(),
     listSearches(),
   ]);
+  const facets = await foundFacets(filters);
   const running = searches.some((s) => s.running);
   const anyFound = Object.values(counts).some((n) => n > 0);
 
@@ -68,7 +64,7 @@ export default async function FoundPage({ searchParams }: { searchParams: Promis
       ) : (
         <div className="flex flex-col gap-5">
           <Suspense>
-            <FoundFilters searches={searchOptions} counts={counts} />
+            <FoundFilters searches={searchOptions} counts={counts} facets={facets} />
           </Suspense>
           {rows.length ? (
             <FoundList key={JSON.stringify(p)} jobs={rows} total={total} />

@@ -26,6 +26,8 @@ const bodySchema = z.object({
       compileLog: z.string().max(30000).optional(),
       jobDescription: z.string().max(40000).optional(),
       industry: z.string().max(200).optional(),
+      foundIds: z.array(z.string().max(64)).max(8).optional(),
+      jobIds: z.array(z.string().max(64)).max(8).optional(),
     })
     .default({}),
 });

@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { companies, discoveredJobs, jobs } from "@/lib/db/schema";
+import { stateOf } from "@/lib/classify";
 import { geocodeTrackedJobs } from "@/lib/search/actions";
 
 export interface MapJob {
@@ -10,6 +11,7 @@ export interface MapJob {
   title: string;
   company: string;
   place: string;
+  state: string | null; // postal code, e.g. "NY"
   lat: number;
   lng: number;
   score: number | null;
@@ -27,6 +29,7 @@ export async function getMapData() {
         title: jobs.title,
         company: companies.name,
         place: jobs.place,
+        location: jobs.location,
         lat: jobs.lat,
         lng: jobs.lng,
         status: jobs.status,
@@ -41,6 +44,8 @@ export async function getMapData() {
         title: discoveredJobs.title,
         company: discoveredJobs.company,
         place: discoveredJobs.place,
+        state: discoveredJobs.state,
+        location: discoveredJobs.location,
         lat: discoveredJobs.lat,
         lng: discoveredJobs.lng,
         status: discoveredJobs.status,
@@ -63,6 +68,7 @@ export async function getMapData() {
       title: j.title,
       company: j.company,
       place: j.place ?? "",
+      state: stateOf(j.place, j.location),
       lat: j.lat!,
       lng: j.lng!,
       score: j.score,
@@ -76,6 +82,7 @@ export async function getMapData() {
       title: j.title,
       company: j.company,
       place: j.place ?? "",
+      state: j.state && j.state.length === 2 ? j.state : stateOf(j.place, j.location),
       lat: j.lat!,
       lng: j.lng!,
       score: j.score,

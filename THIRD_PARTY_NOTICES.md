@@ -18,6 +18,29 @@ official release is downloaded from
 `data/bin`, and Tectonic fetches TeX Live packages on first use. TeX packages
 keep their own licenses.
 
+## us-atlas, topojson-client and d3-geo
+
+- Sources: https://github.com/topojson/us-atlas, https://github.com/topojson/topojson-client,
+  https://github.com/d3/d3-geo (all ISC, Copyright Mike Bostock)
+- Used for: the drawn US map on the Map page (`src/components/map/UsMap.tsx`).
+  The state shapes come from the U.S. Census Bureau's cartographic boundary
+  files (public domain), packaged by us-atlas.
+
+## Simplify job lists
+
+Job Finder doesn't include these lists. When a search runs, your computer
+reads the public `listings.json` files of
+[SimplifyJobs/Summer2027-Internships](https://github.com/SimplifyJobs/Summer2027-Internships)
+and [SimplifyJobs/New-Grad-Positions](https://github.com/SimplifyJobs/New-Grad-Positions)
+on GitHub. The listings belong to Simplify and the employers; each job links to
+the employer's own posting.
+
+## USCIS H-1B Employer Data Hub
+
+Not included. You can download the public data from
+[USCIS](https://www.uscis.gov/tools/reports-and-studies/h-1b-employer-data-hub)
+(a U.S. government work) and import it in Settings.
+
 ## Map tiles
 
 The map shows tiles from [CARTO](https://carto.com/attributions) based on

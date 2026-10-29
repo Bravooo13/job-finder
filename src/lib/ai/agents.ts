@@ -2,16 +2,24 @@
 // context it reads (your resume, a job description, the LaTeX source, a letter).
 // Shared between server and client; prompts can be edited in Settings.
 
-export type AgentId = "resume-tailor" | "latex" | "cover-letter" | "interview-prep" | "job-fit" | "outreach";
+export type AgentId =
+  | "resume-tailor"
+  | "latex"
+  | "cover-letter"
+  | "interview-prep"
+  | "job-fit"
+  | "outreach"
+  | "apply-writer"
+  | "compare";
 
 /** What an agent can be given to read. */
-export type ContextKind = "resume" | "job" | "latex" | "letter" | "industry";
+export type ContextKind = "resume" | "job" | "latex" | "letter" | "industry" | "jobs";
 
 export interface Agent {
   id: AgentId;
   name: string;
   description: string;
-  icon: "wand" | "code" | "mail" | "mic" | "gauge" | "send";
+  icon: "wand" | "code" | "mail" | "mic" | "gauge" | "send" | "pen" | "columns";
   reads: ContextKind[];
   maxTokens: number;
   starters: string[];
@@ -172,6 +180,49 @@ Be honest. A clear "skip this one" is useful. ${HONESTY} Don't invent facts abou
     prompt: `You write short, natural networking messages for a job seeker: LinkedIn connection notes (under 300 characters), messages to alumni or employees asking for a short call, cold emails to recruiters, referral requests, follow-ups after applying, and thank-you notes after interviews.
 
 Rules: brief and specific; one clear ask; mention a real shared link (school, interest, their work) only when you know it; no flattery; no "I hope this finds you well"; none of these words: leverage, passionate, synergy, thrilled. Plain text ready to paste, with a subject line for emails. When the right tone is unclear, give two versions (for example warmer and more direct). Put any names you don't know in [brackets]. ${HONESTY}`,
+  },
+  {
+    id: "apply-writer",
+    name: "Application answers",
+    description: "Short written answers for application forms: why this company, a project you're proud of, and more.",
+    icon: "pen",
+    reads: ["resume", "job"],
+    maxTokens: 1500,
+    starters: [
+      "Why do you want to work here? (about 150 words)",
+      "Describe a project you're proud of. (under 1,000 characters)",
+      "What interests you about this role?",
+    ],
+    prompt: `You write answers to questions on job application forms, in the user's own voice (first person). The question and any length limit are in the user's message.
+
+Rules:
+- Answer only the question, in plain text with no Markdown, no title and no preamble. Stay inside the length limit; if none is given, aim for 80 to 150 words.
+- Be specific: use one real experience from the resume and one concrete detail about the company or role from the job description. No generic praise.
+- Never use: leverage, passionate about, synergy, thrilled, delve into, deep dive, robust, "I am confident that", "I would be a great fit". Vary sentence length.
+- ${HONESTY}
+- For factual questions (dates, links, yes/no), answer in a few words.`,
+  },
+  {
+    id: "compare",
+    name: "Job comparer",
+    description: "Ranks several jobs for you and explains the trade-offs: fit, visa, pay, location, growth.",
+    icon: "columns",
+    reads: ["resume", "jobs"],
+    maxTokens: 4000,
+    starters: [
+      "Rank these jobs for me and say which to apply to first.",
+      "Which of these is best for an F-1 student, and why?",
+      "Compare pay, location and growth for these jobs.",
+    ],
+    prompt: `You compare job openings for the user and help them decide where to spend their application time. The jobs are listed below with their details, and the user's resume and notes are included.
+
+Reply in Markdown:
+1. **Ranking**: the jobs in order, one line each with the main reason.
+2. **Comparison table**: fit with the resume, visa outlook (sponsorship, OPT/CPT, H-1B history), pay, location and work mode, level and years asked, deadline or posting age.
+3. **Trade-offs**: the two or three things that actually separate them.
+4. **Plan**: which to apply to first, what to tailor for each, and any to skip.
+
+Be frank. Quote the posting when a requirement or visa line matters. ${HONESTY} Don't invent facts about the jobs either; say "not stated" when a detail is missing.`,
   },
 ];
 

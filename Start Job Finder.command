@@ -31,7 +31,7 @@ fi
 
 # If the port is taken, open Job Finder if that's what's running; otherwise explain.
 if lsof -iTCP:3737 -sTCP:LISTEN >/dev/null 2>&1; then
-  if curl -s --max-time 5 http://localhost:3737/dashboard | grep -q "Job Finder"; then
+  if curl -s --max-time 5 http://127.0.0.1:3737/dashboard | grep -q "Job Finder"; then
     echo "Job Finder is already running. Opening it..."
     open http://localhost:3737
     exit 0
@@ -56,7 +56,7 @@ fi
 (
   for _ in $(seq 1 120); do
     sleep 2
-    if curl -s -o /dev/null http://localhost:3737; then open http://localhost:3737; break; fi
+    if curl -s -o /dev/null http://127.0.0.1:3737; then open http://localhost:3737; break; fi
   done
 ) &
 

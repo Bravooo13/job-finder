@@ -3,11 +3,13 @@
 import {
   ArrowUp,
   Code2,
+  Columns3,
   Gauge,
   History,
   Loader2,
   Mail,
   Mic,
+  PenLine,
   Plus,
   Send,
   Settings2,
@@ -43,6 +45,8 @@ export const AGENT_ICONS: Record<Agent["icon"], typeof Wand2> = {
   mic: Mic,
   gauge: Gauge,
   send: Send,
+  pen: PenLine,
+  columns: Columns3,
 };
 
 export interface ChatContextInput {
@@ -55,6 +59,8 @@ export interface ChatContextInput {
   compileLog?: string | null;
   jobDescription?: string | null;
   industry?: string | null;
+  foundIds?: string[] | null;
+  jobIds?: string[] | null;
 }
 
 interface Message {
@@ -90,8 +96,11 @@ function looksLikeLetter(text: string) {
 }
 
 function cleanContext(ctx: ChatContextInput) {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(ctx)) if (typeof v === "string" && v.trim()) out[k] = v;
+  const out: Record<string, string | string[]> = {};
+  for (const [k, v] of Object.entries(ctx)) {
+    if (typeof v === "string" && v.trim()) out[k] = v;
+    else if (Array.isArray(v) && v.length) out[k] = v;
+  }
   return out;
 }
 

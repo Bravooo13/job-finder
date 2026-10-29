@@ -1,9 +1,14 @@
 # Job Finder
 
 A personal job search dashboard. Import your resume, let saved searches scan
-thousands of company job boards for roles that fit it, see where the jobs are on
-a map, tailor LaTeX resumes and cover letters with AI agents, and track every
-application from saved to offer.
+thousands of company job boards for roles that fit it, grab jobs from LinkedIn
+and Handshake with a Chrome extension, filter by industry and visa
+friendliness (sponsorship, OPT/CPT, H-1B history), compare jobs side by side,
+tailor LaTeX resumes and cover letters with AI agents, fill application forms
+from your saved answers, and track every application from saved to offer.
+
+AI agents can drive it too, through a JSON API and an MCP server: see
+[CLAUDE.md](./CLAUDE.md).
 
 Everything runs on your own computer. Your jobs and resumes live in a single
 SQLite file under `data/`, which never leaves your machine.
@@ -19,20 +24,44 @@ application calendar, recently added jobs and upcoming apply-by dates.
   and your skills. Job Finder checks every company board it knows, with no cap
   on companies, and scores each posting 0–100 against your resume.
 - About 3,600 company boards are built in (Greenhouse, Lever, Ashby), and you
-  can add any company on Greenhouse, Lever, Ashby or Workday by name or careers
-  link.
+  can add any company on Greenhouse, Lever, Ashby, Workday or SmartRecruiters
+  by name or careers link.
+- Simplify's internship and new-grad lists are scanned too, and every job link
+  that points at a company's own board teaches Job Finder that board, so small
+  companies get scanned directly from then on.
 - Title matching understands word forms ("data scientist" finds "Data Science
   Intern"), skips senior roles, notices "5+ years of experience", and flags
   postings that say they don't sponsor visas.
 - Runs daily at the hour you pick (while the app is open) or on demand, with
   live progress and run history.
 
-**Found jobs**: a review queue of everything your searches found, best
-matches first. See why each job matched, read the description, then save it to
-My jobs or dismiss it.
+**Found jobs**: a review queue of everything your searches and grabs found,
+best matches first. Each job is sorted into an industry and a role type, and
+its visa wording is read: sponsors, open to OPT/CPT, no sponsorship, or US
+citizens only, with the sentence that says so. Filter by visa (including "F-1
+friendly" and known H-1B sponsors from USCIS data), industry, role, level, job
+type, workplace, state, posting date, source and years asked. Save, dismiss,
+or tick a few and compare them.
 
-**Map**: every saved job and new find on a map, grouped by city. Search a city
-(for example Chicago) to list the jobs within 25 miles.
+**Browser helper (Chrome extension)**: on LinkedIn and Handshake, "Grab jobs
+on this page" reads each job at a human pace and sends it to Found jobs, with
+the company's own application link. On any careers page it reads the job data
+or learns the company's job board. See [extension/README.md](./extension/README.md).
+
+**Compare**: two to six jobs side by side (fit, visa outlook, H-1B history,
+level, years asked, place, pay, posting age) and an AI agent that ranks them
+and plans your applications.
+
+**Apply**: your saved jobs waiting to be sent, with what's ready (tailored
+resume, PDF, cover letter, written answers). *My answers* holds your standard
+answers (contact, education, work authorization, availability, EEO choices,
+your own Q&A). On an application form the browser helper fills every field it
+can, attaches your resume and cover letter, drafts open questions with AI and
+colors what needs a look. You review and press Submit yourself.
+
+**Map**: a drawn US map with states shaded by how many jobs they have and a
+bubble per city; click a state or a city to list its jobs. A street map is one
+click away.
 
 **Jobs**
 - Paste a job link and Job Finder fills in the title, company, location,
@@ -71,7 +100,7 @@ changes in the chat next to it ("make the opening punchier"), edit it yourself,
 then copy it, download it or print it to PDF. Every letter and its chat is
 saved.
 
-**AI agents**: six agents, each with its own instructions, that read your
+**AI agents**: eight agents, each with its own instructions, that read your
 resume, the job and your notes about yourself:
 
 | Agent | What it does |
@@ -82,6 +111,8 @@ resume, the job and your notes about yourself:
 | Interview coach | Prep sheets, mock interviews one question at a time, technical drills, STAR stories |
 | Job fit reviewer | A frank fit score, gaps, red flags (sponsorship, years required) and how to apply |
 | Networking messages | LinkedIn notes, alumni and recruiter messages, referral asks, follow-ups, thank-yous |
+| Application answers | Short answers for application forms ("Why this company?") in your voice |
+| Job comparer | Ranks several jobs and explains the trade-offs: fit, visa, pay, location, growth |
 
 Use them on the AI agents page, in a resume's AI chat tab, next to each cover
 letter, or from a job ("Check fit", "Interview prep"). Chats are saved. You can
@@ -116,14 +147,24 @@ Copy `.env.example` to `.env` if you want to change where the data file lives.
 model from Ollama running on your computer. Add a few lines under *About you*
 (goals, visa needs, writing voice) so every agent knows them.
 
+**Browser helper:** open `chrome://extensions`, turn on Developer mode, click
+*Load unpacked* and pick the `extension` folder. Then fill **Apply → My
+answers** (work authorization especially) so forms are answered the way you
+want.
+
 ## Roadmap
 
 - [x] Automations: daily searches across company boards (Greenhouse, Lever,
       Ashby, Workday) with no limit on companies, matched to your resume
 - [x] Jobs map: see openings by city, e.g. everything in Chicago
 - [x] Resume import from PDF and Word
-- [ ] LinkedIn and Handshake: add jobs from your own browser session, plus job
-      alert emails
+- [x] LinkedIn and Handshake: add jobs from your own browser session (Chrome
+      extension)
+- [x] Industry and visa filters (sponsorship, OPT/CPT, H-1B history)
+- [x] Apply helper: fill application forms from your saved answers
+- [x] Compare jobs side by side
+- [x] Agent API and MCP server
+- [ ] Job alert emails
 - [x] AI agents with Claude or Ollama: resume tailoring, LaTeX editing, cover
       letters, interview prep, job fit and networking messages
 - [x] LaTeX resume editor with live PDF preview (Tectonic)
@@ -136,15 +177,18 @@ model from Ollama running on your computer. Add a few lines under *About you*
 ## Tech
 
 Next.js 15 (App Router, server actions), React 19, TypeScript, Tailwind CSS 4,
-Radix UI, Drizzle ORM with SQLite (libSQL), Nivo charts, Leaflet maps,
-CodeMirror and Tectonic.
+Radix UI, Drizzle ORM with SQLite (libSQL), Nivo charts, d3-geo and us-atlas
+(drawn map), Leaflet (street map), CodeMirror and Tectonic.
 
 Everything is local: job boards are read straight from their public feeds by
-your own computer, cities are placed with a bundled copy of GeoNames, and map
-tiles come from CARTO. The only things sent elsewhere are your AI requests,
+your own computer, cities are placed with a bundled copy of GeoNames, the US
+map is drawn from bundled Census shapes, and street-map tiles come from CARTO.
+The app only listens on this computer (127.0.0.1). The only things sent elsewhere are your AI requests,
 to Anthropic when you use Claude (nothing leaves your computer with Ollama).
 
 ### API
+
+The main endpoints are below; [CLAUDE.md](./CLAUDE.md) has the full list.
 
 | Endpoint | What it does |
 | --- | --- |
@@ -155,6 +199,10 @@ to Anthropic when you use Claude (nothing leaves your computer with Ollama).
 | `POST /api/searches` | Creates a search (`name`, `titles`, `keywords`, `locations`, `levels`, …) |
 | `POST /api/searches/:id/run` | Starts a search in the background |
 | `GET /api/jobs/export` | Your tracked jobs as CSV |
+| `GET /api/found` | Found jobs with the same filters as the page |
+| `POST /api/grab`, `POST /api/grab/page` | Add jobs read in the browser; read a careers page |
+| `POST /api/apply/fill` | Answers for an application form's fields |
+| `GET /api/apply/resume` | The resume PDF to upload for a job |
 | `POST /api/ai/chat` | `{ agent, message, threadId?, context }`: streams an agent's reply as NDJSON |
 | `GET /api/settings`, `PUT /api/settings` | AI provider and model, notes about you (never the API key) |
 | `POST /api/latex/compile` | `{ latex }`: returns the PDF, or `{ error, log }` |
@@ -167,6 +215,8 @@ to Anthropic when you use Claude (nothing leaves your computer with Ollama).
 | `npm run dev` | Start in development mode on port 3737 |
 | `npm run build` then `npm start` | Production build and server |
 | `npm run typecheck` | Type-check the project |
+| `npm test` | Unit tests |
+| `npm run mcp` | The MCP server for AI agents ([mcp/README.md](./mcp/README.md)) |
 | `npm run db:generate` | Create a migration after changing `src/lib/db/schema.ts` |
 | `npm run db:studio` | Browse the database in Drizzle Studio |
 

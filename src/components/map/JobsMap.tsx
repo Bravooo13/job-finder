@@ -1,62 +1,51 @@
 "use client";
 
-import "leaflet/dist/leaflet.css";
-import type { CircleMarker, LayerGroup, Map as LeafletMap } from "leaflet";
-import { ExternalLink, Loader2, MapPin, Search, X } from "lucide-react";
+import { ExternalLink, Globe2, Loader2, Map as MapIcon, MapPin, Search, X } from "lucide-react";
 import Link from "next/link";
-import { useTheme } from "next-themes";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { JobStatusBadge } from "@/components/jobs/JobStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Place } from "@/lib/geo";
+import { STATE_NAMES } from "@/lib/geo/states";
 import type { MapJob } from "@/lib/map/queries";
 import { lookUpCity } from "@/lib/search/actions";
 import { cn } from "@/lib/utils";
+import { groupByPlace, milesBetween, type PlaceGroup } from "./groups";
+import { StreetMap } from "./StreetMap";
+import { UsMap } from "./UsMap";
 
 const RADIUS_MILES = 25;
+const VIEW_KEY = "jf.map.view";
 
-function miles(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const r = (d: number) => (d * Math.PI) / 180;
-  const h =
-    Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
-  return 3958.8 * 2 * Math.asin(Math.sqrt(h));
-}
+type Focus = { kind: "city"; key: string | null; label: string; lat: number; lng: number; state: string | null } | { kind: "state"; code: string; label: string };
 
-interface Group {
-  key: string;
-  label: string;
-  lat: number;
-  lng: number;
-  jobs: MapJob[];
-}
-
-function groupByPlace(points: MapJob[]): Group[] {
-  const groups = new Map<string, Group>();
-  for (const p of points) {
-    const key = `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`;
-    const g = groups.get(key);
-    if (g) g.jobs.push(p);
-    else groups.set(key, { key, label: p.place, lat: p.lat, lng: p.lng, jobs: [p] });
-  }
-  return Array.from(groups.values()).sort((a, b) => b.jobs.length - a.jobs.length);
+function cityFocus(g: { key?: string; label: string; lat: number; lng: number; state?: string | null }): Focus {
+  return { kind: "city", key: g.key ?? null, label: g.label, lat: g.lat, lng: g.lng, state: g.state ?? null };
 }
 
 export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracked: number; found: number } }) {
-  const { resolvedTheme } = useTheme();
-  const container = useRef<HTMLDivElement>(null);
-  const map = useRef<LeafletMap | null>(null);
-  const layer = useRef<LayerGroup | null>(null);
-  const tiles = useRef<L.TileLayer | null>(null);
-  const [ready, setReady] = useState(false);
+  const [view, setView] = useState<"us" | "street">("us");
   const [showFound, setShowFound] = useState(true);
   const [showTracked, setShowTracked] = useState(true);
   const [minScore, setMinScore] = useState(0);
-  const [focus, setFocus] = useState<{ label: string; lat: number; lng: number } | null>(null);
+  const [focus, setFocus] = useState<Focus | null>(null);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Place[]>([]);
   const [looking, startLook] = useTransition();
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(VIEW_KEY) === "street") setView("street");
+    } catch {}
+  }, []);
+  function pickView(v: "us" | "street") {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {}
+  }
 
   const visible = useMemo(
     () =>
@@ -68,73 +57,31 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
     [points, showFound, showTracked, minScore],
   );
   const groups = useMemo(() => groupByPlace(visible), [visible]);
+  const stateCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const p of visible) if (p.state) out[p.state] = (out[p.state] ?? 0) + 1;
+    return out;
+  }, [visible]);
+  const topStates = useMemo(
+    () =>
+      Object.entries(stateCounts)
+        .filter(([code]) => code.length === 2)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6),
+    [stateCounts],
+  );
 
   const focusJobs = useMemo(() => {
     if (!focus) return [];
-    return visible
-      .map((p) => ({ p, d: miles(focus, p) }))
-      .filter((x) => x.d <= RADIUS_MILES)
-      .sort((a, b) => (b.p.kind === "tracked" ? 1 : 0) - (a.p.kind === "tracked" ? 1 : 0) || (b.p.score ?? 0) - (a.p.score ?? 0))
-      .map((x) => x.p);
+    const rank = (a: MapJob, b: MapJob) =>
+      (b.kind === "tracked" ? 1 : 0) - (a.kind === "tracked" ? 1 : 0) || (b.score ?? 0) - (a.score ?? 0);
+    if (focus.kind === "state") return visible.filter((p) => p.state === focus.code).sort(rank);
+    return visible.filter((p) => milesBetween(focus, p) <= RADIUS_MILES).sort(rank);
   }, [focus, visible]);
 
-  // Create the map once.
-  useEffect(() => {
-    let cancelled = false;
-    void import("leaflet").then((L) => {
-      if (cancelled || !container.current || map.current) return;
-      const m = L.map(container.current, { zoomControl: true, worldCopyJump: true }).setView([39.5, -96], 4);
-      map.current = m;
-      layer.current = L.layerGroup().addTo(m);
-      setReady(true);
-    });
-    return () => {
-      cancelled = true;
-      map.current?.remove();
-      map.current = null;
-    };
-  }, []);
-
-  // Light or dark map tiles.
-  useEffect(() => {
-    if (!ready || !map.current) return;
-    void import("leaflet").then((L) => {
-      tiles.current?.remove();
-      const style = resolvedTheme === "dark" ? "dark_all" : "light_all";
-      tiles.current = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`, {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 19,
-      }).addTo(map.current!);
-    });
-  }, [ready, resolvedTheme]);
-
-  // Draw one bubble per place.
-  useEffect(() => {
-    if (!ready || !layer.current) return;
-    void import("leaflet").then((L) => {
-      layer.current!.clearLayers();
-      for (const g of groups) {
-        const tracked = g.jobs.some((j) => j.kind === "tracked");
-        const n = g.jobs.length;
-        const marker: CircleMarker = L.circleMarker([g.lat, g.lng], {
-          radius: Math.min(34, 6 + Math.sqrt(n) * 3.2),
-          color: tracked ? "#059669" : "#4f46e5",
-          weight: 1.5,
-          fillColor: tracked ? "#10b981" : "#6366f1",
-          fillOpacity: 0.45,
-        });
-        marker.bindTooltip(`${g.label}: ${n} ${n === 1 ? "job" : "jobs"}`, { direction: "top" });
-        marker.on("click", () => setFocus({ label: g.label, lat: g.lat, lng: g.lng }));
-        marker.addTo(layer.current!);
-      }
-    });
-  }, [ready, groups]);
-
-  // Zoom to the selected city.
-  useEffect(() => {
-    if (focus && map.current) map.current.flyTo([focus.lat, focus.lng], Math.max(map.current.getZoom(), 9), { duration: 0.8 });
-  }, [focus]);
+  const selectedState = focus?.kind === "state" ? focus.code : focus?.kind === "city" ? focus.state : null;
+  const pickCity = (g: PlaceGroup) => setFocus(cityFocus(g));
+  const pickState = (code: string | null) => setFocus(code ? { kind: "state", code, label: STATE_NAMES[code] ?? code } : null);
 
   useEffect(() => {
     if (query.trim().length < 2) {
@@ -150,8 +97,8 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
       <div className="flex min-w-0 flex-col gap-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               aria-label="Find a city"
@@ -163,7 +110,7 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
               onKeyDown={(e) => {
                 if (e.key === "Escape") setSuggestions([]);
                 if (e.key === "Enter" && suggestions[0]) {
-                  setFocus({ label: suggestions[0].label, lat: suggestions[0].lat, lng: suggestions[0].lng });
+                  setFocus(cityFocus({ ...suggestions[0], state: suggestions[0].country === "US" ? suggestions[0].admin : null }));
                   setQuery("");
                 }
               }}
@@ -177,7 +124,7 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
                       type="button"
                       className="w-full px-3 py-2 text-left text-sm hover:bg-accent"
                       onClick={() => {
-                        setFocus({ label: s.label, lat: s.lat, lng: s.lng });
+                        setFocus(cityFocus({ ...s, state: s.country === "US" ? s.admin : null }));
                         setQuery("");
                       }}
                     >
@@ -189,6 +136,28 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex rounded-md border p-0.5" role="radiogroup" aria-label="Map style">
+              {(
+                [
+                  ["us", "US map", MapIcon],
+                  ["street", "Street map", Globe2],
+                ] as const
+              ).map(([v, label, Icon]) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === v}
+                  onClick={() => pickView(v)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-2 py-1",
+                    view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  <Icon className="size-3.5" /> {label}
+                </button>
+              ))}
+            </div>
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={showFound} onChange={(e) => setShowFound(e.target.checked)} className="size-4 accent-[#6366f1]" />
               <span className="size-2.5 rounded-full bg-[#6366f1]" /> Found
@@ -214,18 +183,25 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
             </label>
           </div>
         </div>
-        <div
-          ref={container}
-          className="h-[62vh] min-h-[420px] w-full overflow-hidden rounded-lg border bg-muted"
-          role="application"
-          aria-label="Map of jobs"
-        />
+        {view === "us" ? (
+          <UsMap
+            groups={groups}
+            counts={stateCounts}
+            selected={selectedState}
+            focusKey={focus?.kind === "city" ? focus.key : null}
+            onState={pickState}
+            onCity={pickCity}
+          />
+        ) : (
+          <StreetMap groups={groups} focus={focus?.kind === "city" ? focus : null} onCity={pickCity} />
+        )}
         <p className="text-xs text-muted-foreground">
           {visible.length.toLocaleString()} {visible.length === 1 ? "job" : "jobs"} in {groups.length.toLocaleString()}{" "}
           {groups.length === 1 ? "place" : "places"}
           {remote.found + remote.tracked > 0
             ? ` · ${remote.found + remote.tracked} remote ${remote.found + remote.tracked === 1 ? "job" : "jobs"} without a city aren't on the map`
             : ""}
+          {view === "us" ? " · Only US places are drawn" : ""}
         </p>
       </div>
 
@@ -238,10 +214,12 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
                   <MapPin className="size-4 text-primary" /> {focus.label}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  {focusJobs.length} jobs within {RADIUS_MILES} miles
+                  {focus.kind === "state"
+                    ? `${focusJobs.length} ${focusJobs.length === 1 ? "job" : "jobs"} in this state`
+                    : `${focusJobs.length} ${focusJobs.length === 1 ? "job" : "jobs"} within ${RADIUS_MILES} miles`}
                 </p>
               </div>
-              <Button variant="ghost" size="icon" aria-label="Clear city" onClick={() => setFocus(null)}>
+              <Button variant="ghost" size="icon" aria-label="Clear selection" onClick={() => setFocus(null)}>
                 <X />
               </Button>
             </div>
@@ -278,14 +256,33 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
           </>
         ) : (
           <>
-            <h2 className="font-semibold">Top places</h2>
+            {topStates.length ? (
+              <>
+                <h2 className="font-semibold">Top states</h2>
+                <ul className="flex flex-col gap-1">
+                  {topStates.map(([code, n]) => (
+                    <li key={code}>
+                      <button
+                        type="button"
+                        onClick={() => pickState(code)}
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+                      >
+                        <span className="truncate">{STATE_NAMES[code] ?? code}</span>
+                        <span className="tabular-nums text-muted-foreground">{n}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            <h2 className="font-semibold">Top cities</h2>
             {topCities.length ? (
               <ul className="flex flex-col gap-1">
                 {topCities.map((g) => (
                   <li key={g.key}>
                     <button
                       type="button"
-                      onClick={() => setFocus({ label: g.label, lat: g.lat, lng: g.lng })}
+                      onClick={() => pickCity(g)}
                       className={cn("flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent")}
                     >
                       <span className="truncate">{g.label}</span>
@@ -297,7 +294,7 @@ export function JobsMap({ points, remote }: { points: MapJob[]; remote: { tracke
             ) : (
               <p className="text-sm text-muted-foreground">Run a search or add jobs with a location to see them here.</p>
             )}
-            <p className="mt-auto text-xs text-muted-foreground">Click a bubble or search a city to list its jobs.</p>
+            <p className="mt-auto text-xs text-muted-foreground">Click a state, a bubble or search a city to list its jobs.</p>
           </>
         )}
       </aside>

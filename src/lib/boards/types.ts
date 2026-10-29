@@ -1,11 +1,20 @@
-export const PROVIDERS = ["greenhouse", "lever", "ashby", "workday"] as const;
+/** Job sources a search can read. */
+export const PROVIDERS = ["greenhouse", "lever", "ashby", "workday", "smartrecruiters", "simplify"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
-export const PROVIDER_LABELS: Record<Provider, string> = {
+/** Where a found job came from, including jobs grabbed from sites you browse. */
+export type Source = Provider | "linkedin" | "handshake" | "web";
+
+export const PROVIDER_LABELS: Record<Source, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
   ashby: "Ashby",
   workday: "Workday",
+  smartrecruiters: "SmartRecruiters",
+  simplify: "Simplify lists (GitHub)",
+  linkedin: "LinkedIn",
+  handshake: "Handshake",
+  web: "Other websites",
 };
 
 /** One company's job board. */
@@ -31,6 +40,11 @@ export interface Posting {
   jobType?: string;
   workplace?: string;
   salary?: string;
+  /** Extra signals some sources give: their industry, visa note and category. */
+  sourceIndustry?: string;
+  visaHint?: string;
+  category?: string;
+  applyUrl?: string;
 }
 
 export interface ListOptions {

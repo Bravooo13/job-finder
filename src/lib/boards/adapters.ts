@@ -262,4 +262,201 @@ const workday: BoardAdapter = {
   },
 };
 
-export const ADAPTERS: Record<Provider, BoardAdapter> = { greenhouse, lever, ashby, workday };
+// --------------------------------------------------------- SmartRecruiters
+// Public postings API (no key). The list has location, industry and type; the
+// description comes from the posting itself.
+
+interface SrPosting {
+  id: string;
+  name?: string;
+  releasedDate?: string;
+  company?: { identifier?: string; name?: string };
+  location?: { city?: string; region?: string; country?: string; remote?: boolean; fullLocation?: string };
+  industry?: { label?: string };
+  function?: { label?: string };
+  typeOfEmployment?: { label?: string };
+  experienceLevel?: { label?: string };
+}
+interface SrDetail extends SrPosting {
+  applyUrl?: string;
+  postingUrl?: string;
+  jobAd?: { sections?: Record<string, { title?: string; text?: string } | undefined> };
+}
+
+const SR_API = "https://api.smartrecruiters.com/v1/companies";
+
+const smartrecruiters: BoardAdapter = {
+  async list(board, { signal }) {
+    const all: Posting[] = [];
+    for (let offset = 0; offset < 2000; offset += 100) {
+      const data = await getJson<{ content?: SrPosting[]; totalFound?: number }>(
+        `${SR_API}/${encodeURIComponent(board.token)}/postings?limit=100&offset=${offset}`,
+        { signal },
+      );
+      for (const p of data.content ?? []) {
+        const loc = p.location;
+        const location =
+          loc?.fullLocation ??
+          [loc?.city, loc?.region, loc?.country?.toUpperCase()].filter(Boolean).join(", ") + (loc?.remote ? " (Remote)" : "");
+        all.push({
+          provider: "smartrecruiters",
+          boardToken: board.token,
+          company: p.company?.name ?? board.name,
+          externalId: p.id,
+          title: (p.name ?? "").trim(),
+          location: location || undefined,
+          url: `https://jobs.smartrecruiters.com/${encodeURIComponent(board.token)}/${p.id}`,
+          postedAt: p.releasedDate,
+          jobType: normalizeJobType(p.typeOfEmployment?.label),
+          workplace: loc?.remote ? "remote" : undefined,
+          sourceIndustry: p.industry?.label,
+        });
+      }
+      if (!data.content?.length || offset + 100 >= (data.totalFound ?? 0)) break;
+    }
+    return all;
+  },
+  async detail(board, posting, signal) {
+    const d = await getJson<SrDetail>(`${SR_API}/${encodeURIComponent(board.token)}/postings/${posting.externalId}`, { signal });
+    const sections = Object.values(d.jobAd?.sections ?? {})
+      .map((sec) => [sec?.title, htmlToText(sec?.text ?? "")].filter(Boolean).join("\n"))
+      .filter(Boolean);
+    return {
+      description: sections.join("\n\n"),
+      url: d.postingUrl ?? posting.url,
+      applyUrl: d.applyUrl,
+    };
+  },
+};
+
+// ------------------------------------------------- Simplify lists (GitHub)
+// SimplifyJobs keeps big, community-checked lists of internships and new-grad
+// jobs on GitHub, with a sponsorship field. Descriptions are read from the
+// company's own board when it's one we know.
+
+interface SimplifyListing {
+  company_name?: string;
+  title?: string;
+  url?: string;
+  locations?: string[];
+  date_posted?: number;
+  active?: boolean;
+  is_visible?: boolean;
+  sponsorship?: string | null;
+  category?: string;
+  terms?: string[];
+  id?: string;
+}
+
+export const SIMPLIFY_LISTS = [
+  { token: "Summer2027-Internships", name: "Simplify: internships", level: "internship" },
+  { token: "New-Grad-Positions", name: "Simplify: new grad jobs", level: "entry" },
+] as const;
+
+const SIMPLIFY_MAX_AGE_DAYS = 150;
+
+/** Drops tracking parameters (utm_*, ref=Simplify, …) so the same job isn't saved twice. */
+export function cleanJobUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    for (const key of [...u.searchParams.keys()]) {
+      if (/^(utm_|ref$|refs?rc$|src$|source$|gh_src$|lever-source|trk$|trackingid$|refid$)/i.test(key)) u.searchParams.delete(key);
+    }
+    u.hash = "";
+    return u.toString().replace(/\?$/, "");
+  } catch {
+    return url;
+  }
+}
+
+/** Finds the company board behind a job link, so its description can be read. */
+export function boardFromUrl(url: string): { board: BoardRef; externalId: string } | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (/(^|\.)greenhouse\.io$/.test(u.hostname)) {
+    const i = parts.indexOf("jobs");
+    const token = u.searchParams.get("for") ?? (i > 0 ? parts[i - 1] : parts[0]);
+    const id = u.searchParams.get("token") ?? u.searchParams.get("gh_jid") ?? (i >= 0 ? parts[i + 1] : undefined);
+    if (token && id && /^\d+$/.test(id)) return { board: { provider: "greenhouse", token, name: token }, externalId: id };
+  }
+  if (u.hostname === "jobs.lever.co" || u.hostname === "jobs.eu.lever.co") {
+    if (parts[0] && parts[1]) {
+      return {
+        board: { provider: "lever", token: parts[0], name: parts[0], host: u.hostname.includes(".eu.") ? "eu" : undefined },
+        externalId: parts[1],
+      };
+    }
+  }
+  if (/\.myworkdayjobs\.com$/.test(u.hostname)) {
+    const tenant = u.hostname.split(".")[0];
+    const rest = parts[0] && /^[a-z]{2}-[A-Z]{2}$/.test(parts[0]) ? parts.slice(1) : parts;
+    const site = rest[0];
+    const jobIdx = rest.indexOf("job");
+    if (site && jobIdx > 0) {
+      return {
+        board: { provider: "workday", token: tenant, name: tenant, host: u.hostname, site },
+        externalId: "/" + rest.slice(jobIdx).join("/"),
+      };
+    }
+  }
+  if (u.hostname === "jobs.ashbyhq.com" && parts[0]) {
+    return { board: { provider: "ashby", token: parts[0], name: parts[0] }, externalId: parts[1] ?? "" };
+  }
+  if (u.hostname === "jobs.smartrecruiters.com" && parts[0] && parts[1]) {
+    return { board: { provider: "smartrecruiters", token: parts[0], name: parts[0] }, externalId: parts[1].split("-")[0] };
+  }
+  return null;
+}
+
+const simplify: BoardAdapter = {
+  async list(board, { signal }) {
+    const data = await getJson<SimplifyListing[]>(
+      `https://raw.githubusercontent.com/SimplifyJobs/${encodeURIComponent(board.token)}/dev/.github/scripts/listings.json`,
+      { signal, timeoutMs: 60_000 },
+    );
+    const cutoff = Date.now() / 1000 - SIMPLIFY_MAX_AGE_DAYS * 86_400;
+    const isInternships = /intern/i.test(board.token);
+    return (Array.isArray(data) ? data : [])
+      .filter((l) => l.active && l.is_visible !== false && l.url && l.title && (l.date_posted ?? 0) >= cutoff)
+      .map((l) => ({
+        provider: "simplify" as Provider,
+        boardToken: board.token,
+        company: (l.company_name ?? "").trim(),
+        externalId: l.id ?? l.url!,
+        title: l.title!.trim(),
+        location: (l.locations ?? []).join(" · ") || undefined,
+        url: cleanJobUrl(l.url!),
+        postedAt: l.date_posted ? new Date(l.date_posted * 1000).toISOString() : undefined,
+        jobType: isInternships ? "internship" : "full_time",
+        workplace: workplaceFromText((l.locations ?? []).join(" ")),
+        visaHint: l.sponsorship && l.sponsorship !== "Other" ? l.sponsorship : undefined,
+        category: l.category,
+      }));
+  },
+  async detail(_board, posting, signal) {
+    const found = boardFromUrl(posting.url);
+    if (!found) return {};
+    if (found.board.provider === "lever") {
+      const api = found.board.host === "eu" ? "https://api.eu.lever.co/v0/postings" : "https://api.lever.co/v0/postings";
+      const p = await getJson<LeverPosting>(`${api}/${encodeURIComponent(found.board.token)}/${found.externalId}?mode=json`, { signal });
+      const sections = (p.lists ?? []).map((sec) => [sec.text?.trim(), htmlToText(sec.content ?? "")].filter(Boolean).join("\n"));
+      return {
+        description: [p.descriptionPlain?.trim() || p.openingPlain?.trim(), ...sections, p.additionalPlain?.trim()]
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+    }
+    const adapter = ADAPTERS[found.board.provider];
+    if (!adapter?.detail || found.board.provider === "simplify") return {};
+    const detail = await adapter.detail(found.board, { ...posting, externalId: found.externalId }, signal);
+    // Keep the Simplify link; it points at the same posting.
+    return { description: detail.description, salary: detail.salary, jobType: detail.jobType ?? posting.jobType };
+  },
+};
+
+export const ADAPTERS: Record<Provider, BoardAdapter> = { greenhouse, lever, ashby, workday, smartrecruiters, simplify };

@@ -71,6 +71,12 @@ export const jobs = sqliteTable(
     lng: real("lng"),
     place: text("place"),
     remote: integer("remote", { mode: "boolean" }).notNull().default(false),
+    industry: text("industry"),
+    roleType: text("role_type"),
+    visa: text("visa"),
+    visaNote: text("visa_note"),
+    // The company's own application page, when the posting came from a job site.
+    applyUrl: text("apply_url"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -240,6 +246,19 @@ export const discoveredJobs = sqliteTable(
     lng: real("lng"),
     place: text("place"),
     remote: integer("remote", { mode: "boolean" }).notNull().default(false),
+    // Filled by src/lib/classify for the filters.
+    industry: text("industry"),
+    roleType: text("role_type"),
+    visa: text("visa"), // sponsors | opt_cpt | unknown | no_sponsorship | citizens_only
+    visaNote: text("visa_note"),
+    level: text("level"), // internship | entry | senior | other
+    state: text("state"), // US state code, "Remote" or a country
+    companyKey: text("company_key"),
+    classVersion: integer("class_version").notNull().default(0),
+    // From job sites you browse (LinkedIn, Handshake): their industry and the company's own apply link.
+    sourceIndustry: text("source_industry"),
+    applyUrl: text("apply_url"),
+    grabbed: integer("grabbed", { mode: "boolean" }).notNull().default(false),
     firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -251,6 +270,7 @@ export const discoveredJobs = sqliteTable(
     uniqueIndex("discovered_url_idx").on(t.url),
     index("discovered_status_idx").on(t.status, t.score),
     index("discovered_search_idx").on(t.searchId),
+    index("discovered_company_key_idx").on(t.companyKey),
   ],
 );
 
@@ -267,10 +287,25 @@ export const companyBoards = sqliteTable(
     site: text("site").notNull().default(""), // Workday career site name ("" for other boards)
     careersUrl: text("careers_url"),
     jobCount: integer("job_count"),
+    // Who added it: you | simplify | linkedin | handshake | web | agent
+    origin: text("origin").notNull().default("you"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("company_boards_key_idx").on(t.provider, t.token, t.site)],
 );
+
+// Each time jobs are grabbed from a site you browse (extension or agent).
+export const grabRuns = sqliteTable("grab_runs", {
+  id: id(),
+  source: text("source").notNull(), // linkedin | handshake | web | ...
+  pageUrl: text("page_url"),
+  by: text("by").notNull().default("extension"), // extension | agent | you
+  received: integer("received").notNull().default(0),
+  added: integer("added").notNull().default(0),
+  updated: integer("updated").notNull().default(0),
+  boardsLearned: integer("boards_learned").notNull().default(0),
+  createdAt: createdAt(),
+});
 
 // ---------------------------------------------------------- AI and letters
 
@@ -336,6 +371,36 @@ export const aiMessages = sqliteTable(
   (t) => [index("ai_messages_thread_idx").on(t.threadId, t.createdAt)],
 );
 
+// --------------------------------------------------------------- applying
+
+// Employers that sponsored H-1B visas, from USCIS's H-1B Employer Data Hub.
+export const h1bEmployers = sqliteTable("h1b_employers", {
+  nameKey: text("name_key").primaryKey(), // companyKey() form
+  name: text("name").notNull(),
+  fiscalYear: integer("fiscal_year").notNull(),
+  initialApprovals: integer("initial_approvals").notNull().default(0),
+  totalApprovals: integer("total_approvals").notNull().default(0),
+  denials: integer("denials").notNull().default(0),
+  naics: text("naics"),
+  state: text("state"),
+  city: text("city"),
+});
+
+// Answers to application questions, saved so they can be reused or reviewed.
+export const applyAnswers = sqliteTable(
+  "apply_answers",
+  {
+    id: id(),
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    source: text("source").notNull().default("ai"), // ai | profile | you
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("apply_answers_job_idx").on(t.jobId)],
+);
+
 // ---------------------------------------------------------------- relations
 
 export const companiesRelations = relations(companies, ({ many }) => ({
@@ -399,3 +464,6 @@ export type CompanyBoard = typeof companyBoards.$inferSelect;
 export type CoverLetter = typeof coverLetters.$inferSelect;
 export type AiThread = typeof aiThreads.$inferSelect;
 export type AiMessage = typeof aiMessages.$inferSelect;
+export type H1bEmployer = typeof h1bEmployers.$inferSelect;
+export type ApplyAnswer = typeof applyAnswers.$inferSelect;
+export type GrabRun = typeof grabRuns.$inferSelect;

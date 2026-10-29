@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ export function AssistantHub({
   const [jobId, setJobId] = useState(initialJobId);
   const [jd, setJd] = useState("");
   const [industry, setIndustry] = useState("");
+  const [compareIds, setCompareIds] = useState<string[]>([]);
   const selected = AGENTS.find((a) => a.id === agent)!;
 
   return (
@@ -111,6 +113,35 @@ export function AssistantHub({
               ) : null}
             </div>
           ) : null}
+          {selected.reads.includes("jobs") ? (
+            <fieldset className="grid gap-1.5">
+              <legend className="mb-1.5 text-sm font-medium">Jobs to compare</legend>
+              <div className="grid max-h-56 gap-1 overflow-y-auto">
+                {jobs.map((j) => (
+                  <label key={j.id} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4"
+                      checked={compareIds.includes(j.id)}
+                      disabled={!compareIds.includes(j.id) && compareIds.length >= 8}
+                      onChange={(e) => setCompareIds((ids) => (e.target.checked ? [...ids, j.id] : ids.filter((x) => x !== j.id)))}
+                    />
+                    <span>
+                      {j.title} · <span className="text-muted-foreground">{j.company}</span>
+                    </span>
+                  </label>
+                ))}
+                {!jobs.length ? <p className="text-xs text-muted-foreground">No saved jobs yet.</p> : null}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                To compare found jobs, tick them in{" "}
+                <Link href="/found" className="font-medium text-primary hover:underline">
+                  Found jobs
+                </Link>{" "}
+                and press Compare.
+              </p>
+            </fieldset>
+          ) : null}
           {selected.reads.includes("industry") ? (
             <div className="grid gap-1.5">
               <Label htmlFor="hub-industry">Target industry</Label>
@@ -123,7 +154,7 @@ export function AssistantHub({
       <ChatPanel
         key={agent}
         agents={[agent]}
-        context={{ resumeId, jobId, jobDescription: jobId ? null : jd, industry }}
+        context={{ resumeId, jobId, jobDescription: jobId ? null : jd, industry, jobIds: selected.reads.includes("jobs") ? compareIds : null }}
         scope={{ agent }}
         aiReady={aiReady}
         aiLabel={aiLabel}

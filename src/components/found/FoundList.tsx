@@ -1,15 +1,17 @@
 "use client";
 
-import { Bookmark, ChevronDown, ExternalLink, FileSignature, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { BadgeCheck, Bookmark, ChevronDown, Columns3, ExternalLink, FileSignature, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PROVIDER_LABELS, type Provider } from "@/lib/boards/types";
+import { PROVIDER_LABELS, type Source } from "@/lib/boards/types";
+import { industryLabel } from "@/lib/classify/industry";
+import { roleTypeLabel } from "@/lib/classify/role";
 import { getFoundDescription, saveFoundJob, setFoundStatus } from "@/lib/search/actions";
-import type { FoundRow } from "@/lib/search/queries";
+import type { FoundRow } from "@/lib/found/queries";
 import { cn, timeAgo } from "@/lib/utils";
 
 export function ScoreBadge({ score, className }: { score: number; className?: string }) {
@@ -27,6 +29,51 @@ export function ScoreBadge({ score, className }: { score: number; className?: st
     >
       {score}
     </span>
+  );
+}
+
+/** Visa signal for F-1 students: what the posting says, plus the company's H-1B history. */
+export function VisaBadge({
+  visa,
+  note,
+  h1bApprovals,
+  h1bYear,
+}: {
+  visa: string | null;
+  note?: string | null;
+  h1bApprovals?: number | null;
+  h1bYear?: number | null;
+}) {
+  const warn = "gap-1 bg-amber-100 text-amber-900 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-200";
+  const good = "gap-1 bg-emerald-100 text-emerald-900 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-200";
+  const h1b = h1bApprovals ? (
+    <Badge variant="outline" className="gap-1 border-sky-300 text-sky-800 dark:border-sky-800 dark:text-sky-200" title="USCIS H-1B Employer Data Hub">
+      <BadgeCheck className="size-3" /> H-1B sponsor · {h1bApprovals.toLocaleString()} approved{h1bYear ? ` (FY${h1bYear})` : ""}
+    </Badge>
+  ) : null;
+  const main =
+    visa === "sponsors" ? (
+      <Badge className={good} title={note ?? undefined}>
+        <BadgeCheck className="size-3" /> Sponsors visas
+      </Badge>
+    ) : visa === "opt_cpt" ? (
+      <Badge className={good} title={note ?? undefined}>
+        <BadgeCheck className="size-3" /> OPT/CPT OK
+      </Badge>
+    ) : visa === "no_sponsorship" ? (
+      <Badge className={warn} title={note ?? undefined}>
+        <ShieldAlert className="size-3" /> No visa sponsorship
+      </Badge>
+    ) : visa === "citizens_only" ? (
+      <Badge className={warn} title={note ?? undefined}>
+        <ShieldAlert className="size-3" /> US citizens / clearance
+      </Badge>
+    ) : null;
+  return (
+    <>
+      {main}
+      {h1b}
+    </>
   );
 }
 
@@ -124,17 +171,12 @@ function FoundCard({
             {job.reasons.experienceYears ? (
               <Badge variant="outline">{job.reasons.experienceYears}+ yrs asked</Badge>
             ) : null}
-            {job.flags.includes("no_sponsorship") ? (
-              <Badge className="gap-1 bg-amber-100 text-amber-900 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-200">
-                <ShieldAlert className="size-3" /> No visa sponsorship
-              </Badge>
-            ) : null}
-            {job.flags.includes("citizenship") ? (
-              <Badge className="gap-1 bg-amber-100 text-amber-900 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-200">
-                <ShieldAlert className="size-3" /> Citizenship / clearance
-              </Badge>
-            ) : null}
-            <span className="text-xs text-muted-foreground">via {PROVIDER_LABELS[job.provider as Provider] ?? job.provider}</span>
+            <VisaBadge visa={job.visa ?? (job.flags.includes("citizenship") ? "citizens_only" : job.flags.includes("no_sponsorship") ? "no_sponsorship" : null)} note={job.visaNote} h1bApprovals={job.h1bApprovals} h1bYear={job.h1bYear} />
+            <span className="text-xs text-muted-foreground">
+              {[job.industry && job.industry !== "other" ? industryLabel(job.industry) : job.sourceIndustry, job.roleType && job.roleType !== "other" ? roleTypeLabel(job.roleType) : null, `via ${PROVIDER_LABELS[job.provider as Source] ?? job.provider}`]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
           </div>
           <div className="mt-2 flex items-center gap-3">
             <button type="button" onClick={toggleDetails} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground" aria-expanded={open}>
@@ -203,6 +245,15 @@ export function FoundList({ jobs, total }: { jobs: FoundRow[]; total: number }) 
             </Button>
             <Button size="sm" variant="outline" onClick={() => bulk("dismiss")} disabled={pending}>
               <X /> Dismiss {selected.size}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selected.size < 2 || selected.size > 6}
+              title="Pick 2 to 6 jobs"
+              onClick={() => router.push(`/compare?found=${Array.from(selected).join(",")}`)}
+            >
+              <Columns3 /> Compare
             </Button>
           </div>
         ) : null}

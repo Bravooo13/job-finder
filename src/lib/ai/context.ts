@@ -1,8 +1,11 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { RESUME_SECTIONS } from "@/lib/constants";
 import { db } from "@/lib/db";
-import { coverLetters, discoveredJobs } from "@/lib/db/schema";
+import { coverLetters, discoveredJobs, resumes } from "@/lib/db/schema";
+import { industryLabel } from "@/lib/classify/industry";
+import { visaLabel } from "@/lib/classify/visa";
+import { getFoundMany } from "@/lib/found/queries";
 import { getJob } from "@/lib/jobs/queries";
 import { getResume, type ResumeWithSections } from "@/lib/resumes/queries";
 import { dateRange } from "@/lib/utils";
@@ -20,6 +23,9 @@ export interface ChatContext {
   compileLog?: string;
   jobDescription?: string;
   industry?: string;
+  /** Several found jobs or tracked jobs, for comparing. */
+  foundIds?: string[];
+  jobIds?: string[];
 }
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n[…cut for length]` : text);
@@ -86,6 +92,38 @@ export async function loadJob(ctx: Pick<ChatContext, "jobId" | "foundId">): Prom
   return null;
 }
 
+async function masterResumeId(): Promise<string | undefined> {
+  const row = await db.select({ id: resumes.id }).from(resumes).orderBy(desc(resumes.isMaster), desc(resumes.updatedAt)).limit(1);
+  return row[0]?.id;
+}
+
+async function loadJobsForCompare(ctx: ChatContext): Promise<string[]> {
+  const out: string[] = [];
+  const foundIds = (ctx.foundIds ?? []).slice(0, 8);
+  if (foundIds.length) {
+    const rows = await getFoundMany(foundIds);
+    for (const { found: f, h1bApprovals, h1bYear } of rows) {
+      out.push(
+        [
+          `### ${f.title} — ${f.company}`,
+          `Location: ${f.location ?? "not stated"}${f.workplace ? ` (${f.workplace})` : ""}`,
+          `Type: ${f.jobType ?? "not stated"} · Level: ${f.level ?? "not stated"} · Pay: ${f.salary ?? "not stated"}`,
+          `Match score: ${f.score}/100 (keywords: ${f.reasons.keywords.join(", ") || "none"}${f.reasons.experienceYears ? `; asks ${f.reasons.experienceYears}+ years` : ""})`,
+          `Visa: ${visaLabel(f.visa)}${f.visaNote ? ` (“${f.visaNote}”)` : ""}${h1bApprovals ? `; company had ${h1bApprovals} H-1B approvals in FY${h1bYear}` : ""}`,
+          `Industry: ${industryLabel(f.industry)} · Posted: ${f.postedAt ? f.postedAt.toISOString().slice(0, 10) : "not stated"}`,
+          `Link: ${f.url}`,
+          `Description:\n${clip(f.description ?? "(none saved)", 3500)}`,
+        ].join("\n"),
+      );
+    }
+  }
+  for (const id of (ctx.jobIds ?? []).slice(0, 8)) {
+    const job = await getJob(id);
+    if (job) out.push(`### ${job.title} — ${job.company.name}\nStatus: ${job.status}\n${jobToText({ ...job, company: job.company.name, description: clip(job.description ?? "", 3500) })}`);
+  }
+  return out;
+}
+
 /** Builds the system prompt: the agent's instructions plus everything it should read. */
 export async function buildSystemPrompt(agentId: AgentId, ctx: ChatContext): Promise<string> {
   const agent = getAgent(agentId);
@@ -95,7 +133,7 @@ export async function buildSystemPrompt(agentId: AgentId, ctx: ChatContext): Pro
   const letter = ctx.coverLetterId
     ? await db.query.coverLetters.findFirst({ where: eq(coverLetters.id, ctx.coverLetterId) })
     : undefined;
-  const resumeId = ctx.resumeId ?? letter?.resumeId ?? undefined;
+  const resumeId = ctx.resumeId ?? letter?.resumeId ?? (await masterResumeId());
   const resume = resumeId ? await getResume(resumeId) : null;
   const job = await loadJob({ jobId: ctx.jobId ?? letter?.jobId ?? undefined, foundId: ctx.foundId });
   const pastedJd = ctx.jobDescription?.trim() || letter?.jobDescription?.trim();
@@ -122,6 +160,8 @@ export async function buildSystemPrompt(agentId: AgentId, ctx: ChatContext): Pro
   if (letter?.instructions?.trim()) parts.push(`## What the user wants this letter to emphasize\n${letter.instructions.trim()}`);
   if (ctx.latex?.trim()) parts.push(`## Current LaTeX source\n\`\`\`latex\n${clip(ctx.latex, 60000)}\n\`\`\``);
   if (ctx.compileLog?.trim()) parts.push(`## Last compile log\n\`\`\`\n${clip(ctx.compileLog, 8000)}\n\`\`\``);
+  const many = await loadJobsForCompare(ctx);
+  if (many.length) parts.push(`## Jobs to compare (${many.length})\n${many.join("\n\n---\n\n")}`);
   const draft = ctx.letterDraft ?? letter?.content;
   if (draft?.trim()) parts.push(`## Current cover letter draft\n${clip(draft.trim(), 20000)}`);
   return parts.join("\n\n");

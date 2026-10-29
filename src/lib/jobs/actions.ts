@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
+import { classifyJob } from "@/lib/classify";
 import { APPLIED_STATUSES, JOB_STATUS_VALUES, type JobStatus } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { companies, jobNotes, jobs } from "@/lib/db/schema";
@@ -69,6 +70,19 @@ function toRow(values: JobFormValues) {
   };
 }
 
+/** Industry, role type and visa wording, like found jobs get. */
+function classifyRow(values: JobFormValues, place: string | null) {
+  const c = classifyJob({
+    title: values.title,
+    company: values.company,
+    description: values.description,
+    location: values.location,
+    place,
+    remote: values.workplace === "remote",
+  });
+  return { industry: c.industry, roleType: c.roleType, visa: c.visa, visaNote: c.visaNote };
+}
+
 export async function createJob(
   input: JobFormValues,
 ): Promise<ActionResult<{ id: string }>> {
@@ -77,9 +91,10 @@ export async function createJob(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid job" };
   }
   const companyId = await findOrCreateCompany(parsed.data.company);
+  const row0 = toRow(parsed.data);
   const [row] = await db
     .insert(jobs)
-    .values({ ...toRow(parsed.data), companyId })
+    .values({ ...row0, ...classifyRow(parsed.data, row0.place), companyId })
     .returning({ id: jobs.id });
   revalidateJobs();
   return { ok: true, data: { id: row.id } };
@@ -94,9 +109,14 @@ export async function updateJob(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid job" };
   }
   const companyId = await findOrCreateCompany(parsed.data.company);
+  const row = toRow(parsed.data);
+  const { industry, ...classes } = classifyRow(parsed.data, row.place);
+  const current = await db.select({ industry: jobs.industry }).from(jobs).where(eq(jobs.id, id)).limit(1);
+  // Keep an industry that came from LinkedIn/Handshake or a found job.
+  const keepIndustry = current[0]?.industry && current[0].industry !== "other";
   await db
     .update(jobs)
-    .set({ ...toRow(parsed.data), companyId })
+    .set({ ...row, ...classes, ...(keepIndustry ? {} : { industry }), companyId })
     .where(eq(jobs.id, id));
   revalidateJobs(id);
   return { ok: true, data: null };

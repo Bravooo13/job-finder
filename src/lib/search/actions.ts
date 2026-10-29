@@ -4,10 +4,11 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { findBoards, type FoundBoard } from "@/lib/boards/detect";
+import { forgetKnownBoards } from "@/lib/boards/learn";
 import { db } from "@/lib/db";
 import { companies, companyBoards, discoveredJobs, jobs, searches } from "@/lib/db/schema";
 import { parseLocation } from "@/lib/geo";
-import { PROVIDER_LABELS, type Provider } from "@/lib/boards/types";
+import { PROVIDER_LABELS, type Source } from "@/lib/boards/types";
 import { startSearchRun, stopSearch } from "./runner";
 import { searchFormSchema, splitLines, splitList, type SearchFormValues } from "./schema";
 import { suggestKeywords } from "./queries";
@@ -111,7 +112,7 @@ export async function saveFoundJob(id: string): Promise<ActionResult<{ jobId: st
       workplace: found.workplace,
       jobType: found.jobType,
       status: "new",
-      source: PROVIDER_LABELS[found.provider as Provider] ?? found.provider,
+      source: PROVIDER_LABELS[found.provider as Source] ?? found.provider,
       url: found.url,
       description: found.description,
       salary: found.salary,
@@ -122,6 +123,11 @@ export async function saveFoundJob(id: string): Promise<ActionResult<{ jobId: st
       lng: found.lng,
       place: found.place,
       remote: found.remote,
+      industry: found.industry,
+      roleType: found.roleType,
+      visa: found.visa,
+      visaNote: found.visaNote,
+      applyUrl: found.applyUrl,
     })
     .returning({ id: jobs.id });
   await db.update(discoveredJobs).set({ status: "saved", jobId: job.id }).where(eq(discoveredJobs.id, id));
@@ -166,14 +172,16 @@ export async function addCompanyBoard(board: FoundBoard): Promise<ActionResult> 
     })
     .onConflictDoUpdate({
       target: [companyBoards.provider, companyBoards.token, companyBoards.site],
-      set: { name: board.name, jobCount: board.jobCount, careersUrl: board.careersUrl },
+      set: { name: board.name, jobCount: board.jobCount, careersUrl: board.careersUrl, origin: "you" },
     });
+  forgetKnownBoards();
   revalidatePath("/companies");
   return { ok: true, data: null };
 }
 
 export async function removeCompanyBoard(id: string): Promise<ActionResult> {
   await db.delete(companyBoards).where(eq(companyBoards.id, id));
+  forgetKnownBoards();
   revalidatePath("/companies");
   return { ok: true, data: null };
 }

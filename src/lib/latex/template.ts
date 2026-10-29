@@ -174,3 +174,29 @@ export function blankLatex(name = "Your Name"): string {
 \\end{document}
 `;
 }
+
+/** A plain one-page cover letter, for application forms that want a file. */
+export function letterToLatex(l: {
+  fullName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  content: string;
+  date?: Date;
+}): string {
+  const date = (l.date ?? new Date()).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const contact = [tex(l.location), l.email ? tex(l.email) : "", tex(l.phone)].filter(Boolean).join(" \\,$\\cdot$\\, ");
+  const paragraphs = l.content
+    .split(/\n\s*\n/)
+    .map((p) => p.split("\n").map((line) => tex(line)).join("\\\\\n"))
+    .filter(Boolean);
+  return String.raw`\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[hidelinks]{hyperref}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{10pt}
+\begin{document}
+` + (l.fullName ? `{\\large\\bfseries ${tex(l.fullName)}}\\\\\n${contact ? `\\small ${contact}\n` : ""}\n\\vspace{12pt}\n\n` : "") +
+    `${date}\n\n${paragraphs.join("\n\n")}\n\n\\end{document}\n`;
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/32.png" alt="" width="20" height="20" />
+      <b>Job Finder</b>
+      <span id="conn" class="pill">Checking…</span>
+    </header>
+    <section id="page">
+      <p id="where" class="muted">…</p>
+      <div id="actions" class="actions"></div>
+      <label id="pagesRow" class="row" hidden>Pages to grab
+        <select id="pages"><option>1</option><option>2</option><option>3</option><option>5</option></select>
+      </label>
+      <p id="result" class="result" hidden></p>
+    </section>
+    <nav>
+      <a href="#" data-open="/found">Found jobs</a>
+      <a href="#" data-open="/apply">Apply queue</a>
+      <a href="#" data-open="/apply?tab=answers">My answers</a>
+    </nav>
+    <details>
+      <summary>Settings</summary>
+      <label class="row">Job Finder address <input id="base" placeholder="http://localhost:3737" /></label>
+      <button id="saveBase" class="secondary">Save</button>
+    </details>
+    <script src="popup.js"></script>
+  </body>
+</html>

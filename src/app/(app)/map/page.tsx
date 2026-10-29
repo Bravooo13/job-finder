@@ -9,7 +9,7 @@ export default async function MapPage() {
   const { points, remote } = await getMapData();
   return (
     <>
-      <PageHeader title="Map" description="Where your saved jobs and new finds are. Pick a city to see what's there." />
+      <PageHeader title="Map" description="Where your saved jobs and new finds are. Pick a state or a city to see what's there." />
       <JobsMap points={points} remote={remote} />
     </>
   );
