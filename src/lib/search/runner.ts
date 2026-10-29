@@ -21,8 +21,13 @@ const DETAIL_CONCURRENCY = 4;
 const MAX_DETAILS_PER_BOARD = 40;
 
 // Running searches, so a run can be stopped and two runs of one search can't overlap.
-const globalForRuns = globalThis as unknown as { jobFinderRuns?: Map<string, AbortController> };
+const globalForRuns = globalThis as unknown as {
+  jobFinderRuns?: Map<string, AbortController>;
+  jobFinderStartedAt?: number;
+};
 const active = (globalForRuns.jobFinderRuns ??= new Map());
+// When this app session started; runs older than this were cut off by a restart.
+const sessionStartedAt = (globalForRuns.jobFinderStartedAt ??= Date.now());
 
 export function isSearchRunning(searchId: string): boolean {
   return active.has(searchId);
@@ -118,7 +123,7 @@ async function executeRun(search: Search, runId: string, signal: AbortSignal) {
     lastFlush = Date.now();
     await db
       .update(searchRuns)
-      .set({ ...progress, errors: errors.slice(0, 200) })
+      .set({ ...progress, status: "running", errors: errors.slice(0, 200) })
       .where(eq(searchRuns.id, runId));
   }
 
@@ -252,9 +257,13 @@ async function saveFound(searchId: string, found: Found[]): Promise<number> {
 
 /** Marks runs left "running" by a previous app session as stopped. */
 export async function cleanUpStaleRuns() {
-  const running = await db.select({ id: searchRuns.id, searchId: searchRuns.searchId }).from(searchRuns).where(eq(searchRuns.status, "running"));
+  const running = await db
+    .select({ id: searchRuns.id, searchId: searchRuns.searchId, startedAt: searchRuns.startedAt })
+    .from(searchRuns)
+    .where(eq(searchRuns.status, "running"));
   for (const r of running) {
-    if (active.has(r.searchId)) continue;
+    // Only runs from before this app session; current ones are still going.
+    if (active.has(r.searchId) || r.startedAt.getTime() >= sessionStartedAt) continue;
     await db
       .update(searchRuns)
       .set({ status: "stopped", message: "The app was closed while this search was running.", finishedAt: new Date() })
