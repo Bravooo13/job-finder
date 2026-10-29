@@ -1,6 +1,6 @@
 "use client";
 
-import { Bookmark, ChevronDown, ExternalLink, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { Bookmark, ChevronDown, ExternalLink, FileSignature, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -144,6 +144,12 @@ function FoundCard({
             <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
               <ExternalLink className="size-3.5" /> Posting
             </a>
+            <Link
+              href={`/cover-letters/new?foundId=${job.id}`}
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <FileSignature className="size-3.5" /> Cover letter
+            </Link>
           </div>
           {open ? (
             <div className="mt-2 max-h-80 overflow-y-auto rounded-md border bg-muted/30 p-3 text-sm leading-relaxed whitespace-pre-wrap">

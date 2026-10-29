@@ -114,6 +114,10 @@ export const resumes = sqliteTable("resumes", {
   summary: text("summary"),
   // Full text of an imported resume file, used as extra matching keywords.
   sourceText: text("source_text"),
+  // Field this version is aimed at, like "Quant & trading" (optional).
+  industry: text("industry"),
+  // LaTeX source for this version; compiled to PDF with Tectonic.
+  latex: text("latex"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -268,6 +272,70 @@ export const companyBoards = sqliteTable(
   (t) => [uniqueIndex("company_boards_key_idx").on(t.provider, t.token, t.site)],
 );
 
+// ---------------------------------------------------------- AI and letters
+
+// App settings as JSON values (AI provider, agent prompts, notes about you).
+// The Claude API key is stored encrypted.
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value", { mode: "json" }).$type<unknown>().notNull(),
+  updatedAt: updatedAt(),
+});
+
+export const coverLetters = sqliteTable(
+  "cover_letters",
+  {
+    id: id(),
+    title: text("title").notNull(),
+    company: text("company"),
+    role: text("role"),
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    resumeId: text("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    jobDescription: text("job_description"),
+    instructions: text("instructions"), // what you asked it to emphasize
+    content: text("content").notNull().default(""),
+    notes: text("notes"), // the writer's notes on its choices
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("cover_letters_job_idx").on(t.jobId), index("cover_letters_updated_idx").on(t.updatedAt)],
+);
+
+// A conversation with one of the AI agents, optionally about a resume, job or letter.
+export const aiThreads = sqliteTable(
+  "ai_threads",
+  {
+    id: id(),
+    agent: text("agent").notNull(),
+    title: text("title").notNull(),
+    resumeId: text("resume_id").references(() => resumes.id, { onDelete: "cascade" }),
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    coverLetterId: text("cover_letter_id").references(() => coverLetters.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("ai_threads_updated_idx").on(t.updatedAt),
+    index("ai_threads_resume_idx").on(t.resumeId),
+    index("ai_threads_letter_idx").on(t.coverLetterId),
+  ],
+);
+
+export const aiMessages = sqliteTable(
+  "ai_messages",
+  {
+    id: id(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => aiThreads.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // user | assistant
+    content: text("content").notNull(),
+    model: text("model"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_messages_thread_idx").on(t.threadId, t.createdAt)],
+);
+
 // ---------------------------------------------------------------- relations
 
 export const companiesRelations = relations(companies, ({ many }) => ({
@@ -328,3 +396,6 @@ export type Search = typeof searches.$inferSelect;
 export type SearchRun = typeof searchRuns.$inferSelect;
 export type DiscoveredJob = typeof discoveredJobs.$inferSelect;
 export type CompanyBoard = typeof companyBoards.$inferSelect;
+export type CoverLetter = typeof coverLetters.$inferSelect;
+export type AiThread = typeof aiThreads.$inferSelect;
+export type AiMessage = typeof aiMessages.$inferSelect;

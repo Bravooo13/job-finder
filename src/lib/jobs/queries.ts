@@ -18,6 +18,7 @@ export async function listJobs() {
       url: jobs.url,
       salary: jobs.salary,
       matchScore: jobs.matchScore,
+      resumeId: jobs.resumeId,
       dateApplied: jobs.dateApplied,
       dueDate: jobs.dueDate,
       createdAt: jobs.createdAt,

@@ -1,6 +1,8 @@
 import {
+  Bot,
   Briefcase,
   Building2,
+  FileSignature,
   Inbox,
   LayoutDashboard,
   Map,
@@ -23,4 +25,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/searches", label: "Searches", icon: Radar },
   { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/profile", label: "Profile & resumes", icon: UserRound },
+  { href: "/cover-letters", label: "Cover letters", icon: FileSignature },
+  { href: "/assistant", label: "AI agents", icon: Bot },
 ];

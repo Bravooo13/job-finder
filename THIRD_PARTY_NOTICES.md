@@ -10,6 +10,14 @@ Job Finder includes code and data from the following projects.
   on the map (built by `scripts/build-cities.cjs`)
 - License: [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/)
 
+## Tectonic
+
+Job Finder doesn't include Tectonic. When you install it from the app, the
+official release is downloaded from
+[GitHub](https://github.com/tectonic-typesetting/tectonic) (MIT) into
+`data/bin`, and Tectonic fetches TeX Live packages on first use. TeX packages
+keep their own licenses.
+
 ## Map tiles
 
 The map shows tiles from [CARTO](https://carto.com/attributions) based on

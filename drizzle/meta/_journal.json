@@ -15,6 +15,13 @@
       "when": 1793226065785,
       "tag": "0001_searches_map_import",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793247027535,
+      "tag": "0002_ai_latex_letters",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Compass, Menu } from "lucide-react";
+import { Compass, Menu, Settings } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -18,6 +18,25 @@ function Brand() {
         <Compass className="size-4" />
       </span>
       <span className="text-lg">{APP_NAME}</span>
+    </Link>
+  );
+}
+
+function SettingsLink({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname();
+  const active = pathname.startsWith("/settings");
+  return (
+    <Link
+      href="/settings"
+      onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      <Settings className="size-4" />
+      Settings
     </Link>
   );
 }
@@ -57,7 +76,10 @@ export function Sidebar() {
         <Brand />
         <NavLinks />
       </div>
-      <ThemeToggle />
+      <div className="flex flex-col gap-3">
+        <SettingsLink />
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }
@@ -79,7 +101,10 @@ export function MobileHeader() {
             <Brand />
             <NavLinks onNavigate={() => setOpen(false)} />
           </div>
-          <ThemeToggle />
+          <div className="flex flex-col gap-3">
+            <SettingsLink onNavigate={() => setOpen(false)} />
+            <ThemeToggle />
+          </div>
         </SheetContent>
       </Sheet>
     </header>

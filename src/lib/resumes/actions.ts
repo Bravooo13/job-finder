@@ -6,6 +6,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { db } from "@/lib/db";
 import { jobs, resumeEntries, resumeSkillGroups, resumes } from "@/lib/db/schema";
 import { parseSkills } from "@/lib/jobs/schema";
+import { blankLatex, resumeToLatex } from "@/lib/latex/template";
 import {
   newResumeSchema,
   resumeBasicsSchema,
@@ -65,6 +66,8 @@ export async function createResume(
         linkedin: source?.linkedin ?? null,
         github: source?.github ?? null,
         summary: source?.summary ?? null,
+        industry: source?.industry ?? null,
+        latex: source?.latex ?? null,
       })
       .returning({ id: resumes.id });
 
@@ -292,4 +295,60 @@ export async function deleteSkillGroup(resumeId: string, groupId: string): Promi
   await touch(resumeId);
   revalidateResume(resumeId);
   return { ok: true, data: null };
+}
+
+// ------------------------------------------------------------------ LaTeX
+
+/** Saves the LaTeX source while you type (no page refresh). */
+export async function saveResumeLatex(id: string, latex: string): Promise<ActionResult> {
+  if (latex.length > 500_000) return { ok: false, error: "That document is too large" };
+  await db.update(resumes).set({ latex }).where(eq(resumes.id, id));
+  return { ok: true, data: null };
+}
+
+/** LaTeX built from the resume's Content tab (not saved until you keep it). */
+export async function latexFromContent(id: string): Promise<ActionResult<string>> {
+  const resume = await db.query.resumes.findFirst({
+    where: eq(resumes.id, id),
+    with: {
+      entries: { orderBy: [asc(resumeEntries.sortOrder), asc(resumeEntries.createdAt)] },
+      skillGroups: { orderBy: [asc(resumeSkillGroups.sortOrder), asc(resumeSkillGroups.createdAt)] },
+    },
+  });
+  if (!resume) return { ok: false, error: "Resume not found" };
+  const hasContent = resume.entries.length || resume.skillGroups.length || resume.summary;
+  return { ok: true, data: hasContent ? resumeToLatex(resume) : blankLatex(resume.fullName ?? undefined) };
+}
+
+export async function setResumeIndustry(id: string, industry: string): Promise<ActionResult> {
+  await db.update(resumes).set({ industry: industry.trim().slice(0, 120) || null }).where(eq(resumes.id, id));
+  revalidateResume(id);
+  return { ok: true, data: null };
+}
+
+/** Copies a resume as a new version aimed at an industry, with LaTeX ready to tailor. */
+export async function createIndustryVersion(input: {
+  fromId: string;
+  industry: string;
+  title: string;
+  targetJobId: string;
+}): Promise<ActionResult<{ id: string }>> {
+  const industry = input.industry.trim().slice(0, 120);
+  if (!industry) return { ok: false, error: "Pick or type an industry" };
+  const created = await createResume({
+    title: input.title.trim() || `Resume – ${industry}`,
+    copyFromId: input.fromId,
+    targetJobId: input.targetJobId,
+  });
+  if (!created.ok) return created;
+  const id = created.data.id;
+  const copy = await db.query.resumes.findFirst({ where: eq(resumes.id, id), columns: { latex: true } });
+  let latex = copy?.latex ?? null;
+  if (!latex?.trim()) {
+    const generated = await latexFromContent(id);
+    latex = generated.ok ? generated.data : null;
+  }
+  await db.update(resumes).set({ industry, latex }).where(eq(resumes.id, id));
+  revalidateResume(id);
+  return { ok: true, data: { id } };
 }

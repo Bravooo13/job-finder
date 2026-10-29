@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, FileText, Pencil } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileSignature, FileText, Gauge, Mic, Pencil } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeleteJobButton } from "@/components/jobs/JobDetailActions";
@@ -11,9 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { jobTypeLabel, workplaceLabel } from "@/lib/constants";
+import { listCoverLetters, wordCount } from "@/lib/cover-letters/queries";
 import { getJob, listCompanyNames, listResumeOptions } from "@/lib/jobs/queries";
 import type { JobFormValues } from "@/lib/jobs/schema";
-import { formatDate, toDateInput } from "@/lib/utils";
+import { formatDate, timeAgo, toDateInput } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +34,11 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 
 export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [job, companyNames, resumes] = await Promise.all([
+  const [job, companyNames, resumes, letters] = await Promise.all([
     getJob(id),
     listCompanyNames(),
     listResumeOptions(),
+    listCoverLetters(id),
   ]);
   if (!job) notFound();
 
@@ -88,6 +90,21 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
               </a>
             </Button>
           ) : null}
+          <Button variant="outline" asChild>
+            <Link href={`/cover-letters/new?jobId=${job.id}`}>
+              <FileSignature /> Write cover letter
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href={`/assistant?agent=job-fit&jobId=${job.id}`}>
+              <Gauge /> Check fit
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href={`/assistant?agent=interview-prep&jobId=${job.id}`}>
+              <Mic /> Interview prep
+            </Link>
+          </Button>
           <NewResumeDialog
             resumes={resumes}
             jobs={[{ id: job.id, title: job.title, company: job.company.name }]}
@@ -153,6 +170,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
           <TabsTrigger value="notes">
             Notes{job.notes.length ? ` (${job.notes.length})` : ""}
           </TabsTrigger>
+          <TabsTrigger value="letters">
+            Cover letters{letters.length ? ` (${letters.length})` : ""}
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="description" className="mt-4">
           {job.description ? (
@@ -167,6 +187,29 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         </TabsContent>
         <TabsContent value="notes" className="mt-4 max-w-3xl">
           <NotesSection jobId={job.id} notes={job.notes} />
+        </TabsContent>
+        <TabsContent value="letters" className="mt-4 max-w-3xl">
+          {letters.length ? (
+            <ul className="divide-y rounded-lg border">
+              {letters.map((l) => (
+                <li key={l.id}>
+                  <Link href={`/cover-letters/${l.id}`} className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-accent">
+                    <span className="min-w-0 truncate font-medium">{l.title}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {wordCount(l.content)} words · {timeAgo(l.updatedAt)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No cover letters for this job yet.{" "}
+              <Link href={`/cover-letters/new?jobId=${job.id}`} className="font-medium text-primary hover:underline">
+                Write one
+              </Link>
+            </p>
+          )}
         </TabsContent>
       </Tabs>
     </div>
