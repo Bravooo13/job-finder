@@ -76,6 +76,22 @@ const DECLINE_RE =
 
 const words = (s: string) => normalizeLabel(s).replace(/[^a-z0-9+#. ]/g, " ").split(/\s+/).filter(Boolean);
 
+const STOP = new Set(
+  "a an and are as at be by can do does for from have how i if in is it me my of on or our please the this to us we what when where which who will with would you your".split(" "),
+);
+const content = (s: string) => new Set(words(s).filter((w) => !STOP.has(w)));
+
+/** A saved question matches a form question when they say the same thing, not just share words ("…with Python?" vs "…with SQL?"). */
+function sameQuestion(saved: string, asked: string): boolean {
+  const A = content(saved);
+  const B = content(asked);
+  if (!A.size || !B.size) return false;
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  if (shared === A.size) return true; // every word of your question is in theirs
+  return Math.min(A.size, B.size) >= 2 && shared / Math.min(A.size, B.size) >= 0.9;
+}
+
 function overlap(a: string, b: string): number {
   const A = new Set(words(a));
   const B = new Set(words(b));
@@ -235,6 +251,57 @@ const RULES: Rule[] = [
     id: "age",
     test: (q) => /\b(18|eighteen)\b.{0,30}(years|age|older)|at least 18|over 18|legal age/.test(q),
     answer: (p) => yn(p.over18 || "yes"),
+  },
+
+  // ---- where and how you want to work
+  {
+    id: "location-preference",
+    test: (q) =>
+      /prefer(red)? (office|location|city|work location)|location preference|office preference|which (of our )?(office|location|city)|office location|desired (work )?location|where would you (like|prefer) to (work|be based)|locations? (are|would) you (be )?(interested|open|willing)|interested in working (in|at|from)/.test(
+        q,
+      ),
+    answer: (p, f) => {
+      const wanted = p.preferredLocations.split(/[;\n]|\s\/\s/).map((s) => s.trim()).filter(Boolean);
+      if (!wanted.length) return textAnswer("", "low", "Add your preferred locations in My answers");
+      if (isChoice(f) && f.options?.length) {
+        for (const w of wanted) {
+          const pick = chooseOption(f.options, w) ?? chooseOption(f.options, w.split(",")[0]);
+          if (pick) return { value: pick, confidence: "high" };
+        }
+        return { value: null, confidence: "low", note: `None of the options match ${wanted.join(", ")}` };
+      }
+      return textAnswer(wanted.join("; "));
+    },
+  },
+  {
+    id: "work-arrangement",
+    test: (q) =>
+      !/relocat/.test(q) &&
+      /\b(remote(ly)?|hybrid|on-?site|in[- ]office|in the office|in[- ]person|work arrangement|work(ing)? model|workplace (type|preference)|days (a|per) week in)\b/.test(q),
+    answer: (p, f, q) => {
+      const pref = p.workArrangement;
+      if (!pref) return textAnswer("", "low", "Set your work arrangement in My answers");
+      const LABEL = { any: "Open to on-site, hybrid or remote", onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
+      if (isChoice(f) && f.options?.length && f.options.some((o) => /remote|hybrid|on-?site|in[- ]office|flexible|no preference/i.test(o))) {
+        const pick =
+          pref === "any"
+            ? chooseOption(f.options, "no preference") ?? chooseOption(f.options, "flexible") ?? chooseOption(f.options, "any") ?? chooseOption(f.options, "hybrid")
+            : chooseOption(f.options, LABEL[pref]) ?? chooseOption(f.options, pref === "onsite" ? "in office" : pref);
+        return pick ? { value: pick, confidence: "high" } : { value: null, confidence: "low", note: `No option for ${LABEL[pref]}` };
+      }
+      if (!isChoice(f) && f.type !== "checkbox") return textAnswer(LABEL[pref], "medium");
+      // A yes/no question about one way of working.
+      const asks = /remote/.test(q) ? "remote" : /hybrid/.test(q) ? "hybrid" : "onsite";
+      if (pref === "any" || pref === asks) return yn("yes");
+      if (pref === "remote") return yn("no", "medium", "You prefer remote; check this");
+      if (asks === "onsite" && pref === "hybrid") return yn("yes", "medium", "You prefer hybrid; check how many days they mean");
+      return { value: null, confidence: "low", note: `You prefer ${LABEL[pref].toLowerCase()}; answer this one yourself` };
+    },
+  },
+  {
+    id: "travel",
+    test: (q) => /willing(ness)? to travel|able to travel|comfortable (with )?travel|travel (up to|requirement|\d+ ?%)/.test(q),
+    answer: (p) => yn(p.willingToTravel),
   },
 
   // ---- contact
@@ -404,7 +471,7 @@ export function answerFields(fields: FormField[], profile: ApplyProfile, ctx: An
     const q = normalizeLabel(`${f.label} ${f.placeholder ?? ""}`.trim());
 
     // Your own saved answers win, matched by wording.
-    const own = [...(ctx.saved ?? []), ...profile.custom].find((c) => overlap(c.question, q) >= 0.75);
+    const own = [...(ctx.saved ?? []), ...profile.custom].find((c) => sameQuestion(c.question, q));
     if (own && f.type !== "file") {
       const value = isChoice(f) && f.options?.length ? chooseOption(f.options, own.answer) : own.answer;
       if (value) return { key: f.key, value, confidence: "high", rule: "saved-answer" };

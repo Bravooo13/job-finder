@@ -22,7 +22,23 @@ const YES_NO: { value: "yes" | "no" | ""; label: string }[] = [
   { value: "", label: "Not set" },
 ];
 
-function YesNo({ label, hint, value, onChange }: { label: string; hint?: string; value: string; onChange: (v: string) => void }) {
+function YesNo(props: { label: string; hint?: string; value: string; onChange: (v: string) => void }) {
+  return <Choice {...props} options={YES_NO} />;
+}
+
+function Choice({
+  label,
+  hint,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
@@ -30,7 +46,7 @@ function YesNo({ label, hint, value, onChange }: { label: string; hint?: string;
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </div>
       <div className="flex shrink-0 gap-1 rounded-md border p-0.5" role="radiogroup" aria-label={label}>
-        {YES_NO.map((o) => (
+        {options.map((o) => (
           <button
             key={o.value || "unset"}
             type="button"
@@ -49,6 +65,28 @@ function YesNo({ label, hint, value, onChange }: { label: string; hint?: string;
     </div>
   );
 }
+
+const ARRANGEMENTS: { value: ApplyProfile["workArrangement"]; label: string }[] = [
+  { value: "any", label: "Any" },
+  { value: "onsite", label: "On-site" },
+  { value: "hybrid", label: "Hybrid" },
+  { value: "remote", label: "Remote" },
+  { value: "", label: "Not set" },
+];
+
+// Questions forms often ask that don't have a box above. Click one to add it, then type your answer.
+const COMMON_QUESTIONS = [
+  "What is your current or most recent employer?",
+  "What is your current or most recent job title?",
+  "Please list your relevant coursework.",
+  "Which programming languages and tools are you proficient in?",
+  "How many years of experience do you have with Python?",
+  "How many years of experience do you have with SQL?",
+  "Are you available to work full-time during the internship?",
+  "How many hours per week can you work during the school year?",
+  "Do you have any upcoming deadlines or offers we should know about?",
+  "What are your career goals?",
+];
 
 export function AnswersForm({ initial }: { initial: ApplyProfile }) {
   const [p, setP] = useState<ApplyProfile>(initial);
@@ -184,8 +222,29 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
             {field("languages", "Languages")}
           </div>
           <YesNo label="At least 18 years old" value={p.over18} onChange={(v) => set("over18", v)} />
-          <YesNo label="Willing to relocate" value={p.willingToRelocate} onChange={(v) => set("willingToRelocate", v)} />
           <YesNo label="Worked at the company before (default)" value={p.workedHereBefore} onChange={(v) => set("workedHereBefore", v)} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Where and how you want to work</CardTitle>
+          <CardDescription>Answers “Which office do you prefer?”, “Are you open to working on-site?” and travel questions.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {field("preferredLocations", "Preferred offices or cities, in order", {
+            placeholder: "Chicago, IL; New York, NY; Remote",
+            hint: "Separate with semicolons. When a form lists offices, the first one that matches is picked.",
+          })}
+          <Choice
+            label="Work arrangement"
+            hint="Remote, hybrid or in the office"
+            value={p.workArrangement}
+            onChange={(v) => set("workArrangement", v)}
+            options={ARRANGEMENTS}
+          />
+          <YesNo label="Willing to relocate" value={p.willingToRelocate} onChange={(v) => set("willingToRelocate", v)} />
+          <YesNo label="Willing to travel for work" value={p.willingToTravel} onChange={(v) => set("willingToTravel", v)} />
         </CardContent>
       </Card>
 
@@ -206,7 +265,9 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
       <Card>
         <CardHeader>
           <CardTitle>Your own questions</CardTitle>
-          <CardDescription>Questions you get often, with your answer. Matched by wording.</CardDescription>
+          <CardDescription>
+            Questions you get often, with your answer. When a form asks the same thing, your answer is used, even in a dropdown.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {p.custom.map((c, i) => (
@@ -236,6 +297,23 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
               <Plus /> Add a question
             </Button>
           </div>
+          {COMMON_QUESTIONS.some((c) => !p.custom.some((x) => x.question === c)) ? (
+            <div className="grid gap-2">
+              <p className="text-sm text-muted-foreground">Common questions (click to add, then type your answer):</p>
+              <div className="flex flex-wrap gap-1.5">
+                {COMMON_QUESTIONS.filter((c) => !p.custom.some((x) => x.question === c)).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => set("custom", [...p.custom, { question: c, answer: "" }])}
+                    className="rounded-full border px-3 py-1 text-left text-xs hover:bg-accent"
+                  >
+                    + {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

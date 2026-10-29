@@ -31,7 +31,13 @@ const p = applyProfileSchema.parse({
   willingToRelocate: "yes",
   startDate: "2027-06",
   hearAbout: "LinkedIn",
-  custom: [{ question: "Why are you interested in data science?", answer: "Because data explains markets." }],
+  preferredLocations: "Chicago, IL; New York, NY; Remote",
+  workArrangement: "hybrid",
+  willingToTravel: "yes",
+  custom: [
+    { question: "Why are you interested in data science?", answer: "Because data explains markets." },
+    { question: "How many years of experience do you have with Python?", answer: "3" },
+  ],
 });
 
 const YN = ["Yes", "No"];
@@ -107,4 +113,24 @@ test("files, consent and open questions", () => {
 test("chooseOption", () => {
   assert.equal(chooseOption(["Select one", "Yes", "No"], "yes"), "Yes");
   assert.equal(chooseOption(["Prefer not to say", "Woman", "Man"], "decline"), "Prefer not to say");
+});
+
+test("office, work arrangement and travel preferences", () => {
+  assert.equal(ask("Which office location do you prefer?", "select", ["New York, NY", "Chicago, IL", "San Francisco, CA"]).value, "Chicago, IL");
+  assert.equal(ask("Preferred location", "checkbox", ["Austin", "New York", "Seattle"]).value, "New York");
+  assert.equal(ask("Which locations are you interested in?", "text", undefined).value, "Chicago, IL; New York, NY; Remote");
+  assert.equal(ask("What is your preferred work arrangement?", "select", ["Remote", "Hybrid", "On-site"]).value, "Hybrid");
+  assert.equal(ask("Are you comfortable working remotely?").value, null, "hybrid person, remote question: left for you");
+  const office = ask("Are you able to work in the office 3 days a week?");
+  assert.equal(office.value, "Yes");
+  assert.equal(office.confidence, "medium");
+  assert.equal(ask("Are you willing to travel up to 25%?").value, "Yes");
+  assert.equal(ask("Are you willing to relocate?").value, "Yes", "relocation is not a work-arrangement question");
+  assert.equal(ask("Location (City)", "text", undefined).value, "Chicago, IL", "your own city is still your address");
+});
+
+test("saved answers match the same question, not a similar one", () => {
+  assert.equal(ask("How many years of experience do you have with Python?", "text", undefined).value, "3");
+  assert.equal(ask("Years of Python experience", "text", undefined).value, "3");
+  assert.notEqual(ask("How many years of experience do you have with SQL?", "text", undefined).value, "3");
 });

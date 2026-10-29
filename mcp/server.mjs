@@ -309,7 +309,7 @@ const TOOLS = [
   {
     name: "get_apply_profile",
     description:
-      "The owner's standard application answers: contact, education, work authorization (authorized to work, sponsorship now/later, visa status), availability, EEO choices and custom Q&A. Read it before answering any form.",
+      "The owner's standard application answers: contact, education, work authorization (authorized to work, sponsorship now/later, visa status), preferred offices and work arrangement, availability, EEO choices and his own Q&A. Read it before answering any form.",
     inputSchema: { type: "object", properties: {} },
     run: () => call("GET", "/api/apply/profile"),
   },

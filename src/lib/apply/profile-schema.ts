@@ -44,7 +44,12 @@ export const applyProfileSchema = z.object({
   hasClearance: yesNo,
   usPerson: yesNo, // export-control "U.S. person" (citizen, green card, refugee/asylee)
   over18: yesNo,
+
+  // Where and how you want to work
+  preferredLocations: text(300), // "Chicago, IL; New York, NY; Remote", in order of preference
+  workArrangement: z.enum(["any", "onsite", "hybrid", "remote", ""]).default(""),
   willingToRelocate: yesNo,
+  willingToTravel: yesNo,
 
   // Availability and pay
   startDate: text(20), // YYYY-MM-DD or YYYY-MM

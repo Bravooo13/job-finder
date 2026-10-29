@@ -388,6 +388,9 @@ widths and look for console errors. Extension scripts should pass
   any-page grabbing, agent hook.
 - Apply page (queue, My answers, extension setup), answer engine, resume and
   cover-letter PDFs for upload, AI answers to open questions.
+- My answers: "Where and how you want to work" (preferred offices in order,
+  work arrangement, relocation, travel) and one-click common questions; saved
+  answers now match only the same question ("…with Python?" ≠ "…with SQL?").
 - Compare page with the Job comparer agent; Application answers agent.
 - Map: drawn US map (states shaded by jobs, city bubbles, click a state), with
   the street map as an option.
