@@ -58,6 +58,20 @@ export function fold(text: string): string {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+/** Word forms without merging families: "analytics" stays apart from "analyst". */
+function narrowStem(token: string): string {
+  if (/^(intern|interns|internship|internships|co-op|coop)$/.test(token)) return "intern";
+  return token.length > 4 && token.endsWith("s") && !token.endsWith("ss") ? token.slice(0, -1) : token;
+}
+
+function rawTokens(text: string): string[] {
+  return fold(text)
+    .replace(/\bml\b/g, "machine learning")
+    .replace(/\bbi\b/g, "business intelligence")
+    .split(/[^a-z0-9+#]+/)
+    .filter((t) => t && !STOP.has(t));
+}
+
 function tokens(text: string): string[] {
   const words = fold(text)
     .replace(/\bml\b/g, "machine learning")
@@ -187,7 +201,8 @@ function locationFit(
     if (inState) return { ok: true, points: 9, label: inState.label, place: inState };
   }
   for (const w of wanted) {
-    const inCountry = w.country ? loc.places.find((p) => p.country === w.country) : undefined;
+    // Only plain country entries ("United States") match anywhere in the country.
+    const inCountry = w.country && !w.admin && !w.place ? loc.places.find((p) => p.country === w.country) : undefined;
     if (inCountry) return { ok: true, points: 6, label: inCountry.label, place: inCountry };
   }
   if (loc.remote && includeRemote) {
@@ -217,8 +232,15 @@ export interface Matcher {
 }
 
 export function createMatcher(config: MatchConfig): Matcher {
+  // Multi-word titles match word families ("data scientist" finds "Data Science
+  // Intern"). A one-word title matches only its own word forms, so "analytics"
+  // doesn't pull in every "... Analyst".
   const titleTargets = config.titles
-    .map((t) => ({ raw: t.trim(), stems: tokens(t).filter((s) => s !== "intern") }))
+    .map((t) => {
+      const stems = tokens(t).filter((s) => s !== "intern");
+      const narrow = rawTokens(t).map(narrowStem).filter((s) => s !== "intern");
+      return { raw: t.trim(), stems, narrow: stems.length === 1 && narrow.length === 1 ? narrow[0] : null };
+    })
     .filter((t) => t.raw && t.stems.length);
   const excludes = config.excludeWords.map((w) => w.trim()).filter(Boolean);
   const wanted = parseWanted(config.locations);
@@ -228,7 +250,10 @@ export function createMatcher(config: MatchConfig): Matcher {
   function titleTarget(title: string): string | null {
     if (!titleTargets.length) return "";
     const have = new Set(tokens(title));
-    for (const t of titleTargets) if (t.stems.every((s) => have.has(s))) return t.raw;
+    const haveNarrow = new Set(rawTokens(title).map(narrowStem));
+    for (const t of titleTargets) {
+      if (t.narrow ? haveNarrow.has(t.narrow) : t.stems.every((s) => have.has(s))) return t.raw;
+    }
     return null;
   }
 

@@ -14,6 +14,19 @@ export function splitList(value: string): string[] {
   );
 }
 
+/** One entry per line (locations like "Chicago, IL" contain commas). */
+export function splitLines(value: string): string[] {
+  return Array.from(
+    new Map(
+      value
+        .split(/[\n;]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => [s.toLowerCase(), s]),
+    ).values(),
+  );
+}
+
 export const searchFormSchema = z.object({
   name: z.string().trim().min(1, "Name this search").max(120),
   titles: z.string().max(3000),

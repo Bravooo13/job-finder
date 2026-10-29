@@ -9,7 +9,7 @@ import { companies, companyBoards, discoveredJobs, jobs, searches } from "@/lib/
 import { parseLocation } from "@/lib/geo";
 import { PROVIDER_LABELS, type Provider } from "@/lib/boards/types";
 import { startSearchRun, stopSearch } from "./runner";
-import { searchFormSchema, splitList, type SearchFormValues } from "./schema";
+import { searchFormSchema, splitLines, splitList, type SearchFormValues } from "./schema";
 import { suggestKeywords } from "./queries";
 
 function revalidateSearches(id?: string) {
@@ -23,10 +23,10 @@ function revalidateSearches(id?: string) {
 function toRow(v: SearchFormValues) {
   return {
     name: v.name,
-    titles: splitList(v.titles),
+    titles: splitLines(v.titles),
     keywords: splitList(v.keywords),
     excludeWords: splitList(v.excludeWords),
-    locations: splitList(v.locations),
+    locations: splitLines(v.locations),
     includeRemote: v.includeRemote,
     levels: v.levels,
     sources: v.sources,
@@ -40,7 +40,7 @@ function toRow(v: SearchFormValues) {
 export async function createSearch(input: SearchFormValues): Promise<ActionResult<{ id: string }>> {
   const parsed = searchFormSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid search" };
-  if (!splitList(parsed.data.titles).length) return { ok: false, error: "Add at least one job title to look for" };
+  if (!splitLines(parsed.data.titles).length) return { ok: false, error: "Add at least one job title to look for" };
   const [row] = await db.insert(searches).values(toRow(parsed.data)).returning({ id: searches.id });
   revalidateSearches();
   return { ok: true, data: { id: row.id } };
@@ -49,7 +49,7 @@ export async function createSearch(input: SearchFormValues): Promise<ActionResul
 export async function updateSearch(id: string, input: SearchFormValues): Promise<ActionResult> {
   const parsed = searchFormSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid search" };
-  if (!splitList(parsed.data.titles).length) return { ok: false, error: "Add at least one job title to look for" };
+  if (!splitLines(parsed.data.titles).length) return { ok: false, error: "Add at least one job title to look for" };
   await db.update(searches).set(toRow(parsed.data)).where(eq(searches.id, id));
   revalidateSearches(id);
   return { ok: true, data: null };

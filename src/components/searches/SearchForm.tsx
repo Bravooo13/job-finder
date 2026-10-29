@@ -19,7 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { PROVIDER_LABELS, PROVIDERS, type Provider } from "@/lib/boards/types";
 import { createSearch, keywordsFromResume, updateSearch } from "@/lib/search/actions";
-import { splitList, TITLE_PRESETS, type SearchFormValues } from "@/lib/search/schema";
+import { splitLines, splitList, TITLE_PRESETS, type SearchFormValues } from "@/lib/search/schema";
 import { cn } from "@/lib/utils";
 
 const LEVELS = [
@@ -97,7 +97,7 @@ export function SearchForm({
   }
 
   function addTitles(titles: string[]) {
-    const merged = splitList([v.titles, ...titles].join("\n"));
+    const merged = splitLines([v.titles, ...titles].join("\n"));
     set("titles", merged.join("\n"));
   }
 
@@ -130,7 +130,7 @@ export function SearchForm({
     });
   }
 
-  const titleCount = splitList(v.titles).length;
+  const titleCount = splitLines(v.titles).length;
   const keywordCount = splitList(v.keywords).length;
 
   return (
