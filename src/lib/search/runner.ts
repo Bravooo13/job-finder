@@ -194,6 +194,21 @@ async function executeRun(search: Search, runId: string, signal: AbortSignal) {
     signal,
   );
 
+  // LinkedIn's public job search, for searches that include it: a few queries, read slowly.
+  if (search.sources.includes("linkedin") && !signal.aborted) {
+    const { linkedInForSearch } = await import("@/lib/grab/linkedin");
+    const r = await linkedInForSearch(search, queries, signal).catch((e) => {
+      errors.push({ board: "LinkedIn", error: e instanceof Error ? e.message : String(e) });
+      return null;
+    });
+    if (r) {
+      progress.postingsSeen += r.found;
+      progress.matched += r.received;
+      progress.newJobs += r.added;
+      if (r.slowedDown) errors.push({ board: "LinkedIn", error: "LinkedIn asked to slow down; the rest waits for the next run." });
+    }
+  }
+
   await flush(true);
   const stopped = signal.aborted;
   const finishedAt = new Date();

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { FoundFilters } from "@/components/found/FoundFilters";
 import { FoundList } from "@/components/found/FoundList";
+import { LinkedInSearchDialog } from "@/components/found/LinkedInSearchDialog";
 import { EmptyState, PageHeader } from "@/components/layout/PageHeader";
 import { AutoRefresh } from "@/components/searches/RunControls";
 import { Button } from "@/components/ui/button";
@@ -39,11 +40,14 @@ export default async function FoundPage({ searchParams }: { searchParams: Promis
             : "Jobs your searches found, best matches first. Save the ones you like to My jobs."
         }
         actions={
-          <Button variant="outline" asChild>
-            <Link href="/searches">
-              <Radar /> Searches
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <LinkedInSearchDialog />
+            <Button variant="outline" asChild>
+              <Link href="/searches">
+                <Radar /> Searches
+              </Link>
+            </Button>
+          </div>
         }
       />
       {!anyFound ? (

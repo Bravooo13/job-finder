@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { PROVIDERS } from "@/lib/boards/types";
 
+/** Where a search looks: the job-board feeds, plus LinkedIn's public job search. */
+export const SEARCH_SOURCES = [...PROVIDERS, "linkedin"] as const;
+export type SearchSource = (typeof SEARCH_SOURCES)[number];
+
 /** "a, b\nc" → ["a", "b", "c"] without duplicates. */
 export function splitList(value: string): string[] {
   return Array.from(
@@ -35,7 +39,7 @@ export const searchFormSchema = z.object({
   locations: z.string().max(2000),
   includeRemote: z.boolean(),
   levels: z.array(z.enum(["internship", "entry", "any"])).min(1, "Pick at least one level"),
-  sources: z.array(z.enum(PROVIDERS)).min(1, "Pick at least one job board type"),
+  sources: z.array(z.enum(SEARCH_SOURCES)).min(1, "Pick at least one job board type"),
   companyScope: z.enum(["all", "mine"]),
   resumeId: z.string(),
   minScore: z.number().int().min(0).max(100),

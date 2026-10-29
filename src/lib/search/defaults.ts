@@ -11,7 +11,7 @@ export function newSearchDefaults(resumeId: string): SearchFormValues {
     locations: "United States",
     includeRemote: true,
     levels: ["internship", "entry"],
-    sources: ["greenhouse", "lever", "ashby", "workday"],
+    sources: ["greenhouse", "lever", "ashby", "workday", "smartrecruiters", "simplify", "linkedin"],
     companyScope: "all",
     resumeId,
     minScore: 45,

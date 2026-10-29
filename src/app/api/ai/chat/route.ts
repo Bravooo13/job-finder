@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getAgent, type AgentId } from "@/lib/ai/agents";
 import { buildSystemPrompt } from "@/lib/ai/context";
 import { AiError, runChat, stripThinking, type ChatMessage } from "@/lib/ai/providers";
+import { runScout } from "@/lib/ai/scout";
 import { getAiSettings } from "@/lib/ai/settings";
 import { db } from "@/lib/db";
 import { aiMessages, aiThreads } from "@/lib/db/schema";
@@ -113,7 +114,7 @@ export async function POST(request: Request) {
       let text = "";
       let model: string | null = null;
       try {
-        const result = await runChat(
+        const result = await (agent.id === "job-scout" ? runScout : runChat)(
           {
             system,
             messages,

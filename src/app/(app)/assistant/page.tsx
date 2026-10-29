@@ -15,7 +15,7 @@ export default async function AssistantPage({
 }) {
   const query = await searchParams;
   const [resumes, jobs, ai] = await Promise.all([listResumeOptions(), listJobOptions(), getAiStatus()]);
-  const agent = (getAgent(query.agent ?? "")?.id ?? "job-fit") as AgentId;
+  const agent = (getAgent(query.agent ?? "")?.id ?? "job-scout") as AgentId;
   return (
     <>
       <PageHeader

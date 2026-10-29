@@ -201,6 +201,33 @@ const TOOLS = [
     run: (a) => call("PATCH", `/api/jobs/${encodeURIComponent(a.id)}`, { status: a.status, note: a.note }),
   },
   {
+    name: "grab_linkedin",
+    description:
+      "Reads a LinkedIn job search and adds every job to Found jobs, with no scrolling: pass the search page's address-bar URL (searchUrl), or keywords + location. Job Finder reads LinkedIn's public job pages itself, one at a time with a pause (about 2 seconds a job), skips jobs it already has, and stops if LinkedIn asks it to slow down. No LinkedIn login is used. Takes about a minute per page of 25.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        searchUrl: str("A LinkedIn job search URL, e.g. https://www.linkedin.com/jobs/search/?keywords=data%20analyst&location=Chicago&f_TPR=r604800"),
+        keywords: str("Search words, when there's no searchUrl."),
+        location: str("City, state or country (default United States)."),
+        postedDays: { type: "number", description: "Only jobs posted in the last N days." },
+        remote: { type: "boolean", description: "Remote jobs only." },
+        ids: strList("LinkedIn job ids to read, e.g. from the page you're looking at."),
+        pages: { type: "number", description: "Results pages of 25 to read (1 to 10, default 1)." },
+        save: { type: "boolean", description: "Also save them to My jobs." },
+      },
+    },
+    run: async (a) => {
+      let run = await call("POST", "/api/grab/linkedin", { ...a, by: "agent", wait: 150 });
+      const end = Date.now() + 10 * 60_000;
+      while (run.state === "running" && Date.now() < end) {
+        await new Promise((r) => setTimeout(r, 5000));
+        run = await call("GET", `/api/grab/linkedin?id=${encodeURIComponent(run.id)}`);
+      }
+      return run;
+    },
+  },
+  {
     name: "send_grabbed_jobs",
     description:
       "Adds jobs you read from a website (LinkedIn, Handshake, Indeed, a company careers page) to Found jobs. Job Finder scores them against the owner's searches, classifies industry/visa, dedupes, and learns company boards from applyUrl. Send up to 200 per call.",

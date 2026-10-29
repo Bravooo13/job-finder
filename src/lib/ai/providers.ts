@@ -23,7 +23,7 @@ export interface ChatResult {
 /** An error with a message that can be shown to the user as is. */
 export class AiError extends Error {}
 
-const CLAUDE_URL = () => (process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com").replace(/\/+$/, "");
+export const CLAUDE_URL = () => (process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com").replace(/\/+$/, "");
 
 /** Sends a conversation to the AI picked in Settings and streams the reply through onText. */
 export async function runChat(req: ChatRequest, settings?: AiSettings): Promise<ChatResult> {
@@ -33,7 +33,7 @@ export async function runChat(req: ChatRequest, settings?: AiSettings): Promise<
 
 // ------------------------------------------------------------------ Claude
 
-function claudeError(status: number, body: string, model: string): AiError {
+export function claudeError(status: number, body: string, model: string): AiError {
   let message = "";
   let type = "";
   try {

@@ -10,7 +10,8 @@ export type AgentId =
   | "job-fit"
   | "outreach"
   | "apply-writer"
-  | "compare";
+  | "compare"
+  | "job-scout";
 
 /** What an agent can be given to read. */
 export type ContextKind = "resume" | "job" | "latex" | "letter" | "industry" | "jobs";
@@ -19,7 +20,7 @@ export interface Agent {
   id: AgentId;
   name: string;
   description: string;
-  icon: "wand" | "code" | "mail" | "mic" | "gauge" | "send" | "pen" | "columns";
+  icon: "wand" | "code" | "mail" | "mic" | "gauge" | "send" | "pen" | "columns" | "radar";
   reads: ContextKind[];
   maxTokens: number;
   starters: string[];
@@ -29,6 +30,29 @@ export interface Agent {
 const HONESTY = `Never invent facts about the user. Every employer, title, date, degree, number, tool and result must come from their resume or from what they tell you. When something would help but isn't there, write a clearly marked placeholder like [add number] and say what you need.`;
 
 export const AGENTS: Agent[] = [
+  {
+    id: "job-scout",
+    name: "Job scout",
+    description: "Searches LinkedIn, company job boards and careers pages for you, then shortlists the best fits.",
+    icon: "radar",
+    reads: ["resume"],
+    maxTokens: 4000,
+    starters: [
+      "Find data and analytics internships in Chicago posted this week that don't rule out sponsorship, and shortlist the best 5.",
+      "Search LinkedIn for quant research and trading internships for Summer 2027.",
+      "Find small fintech and data companies in Chicago, add their job boards, and show me what they have.",
+    ],
+    prompt: `You are the user's job scout. You find job openings for them with your tools and come back with a short, honest shortlist. The user's resume and notes are below.
+
+How to work:
+- Start from what's already in Job Finder (search_found_jobs), then go get more: search_linkedin (1 to 3 pages per search, a minute each, so a few well-chosen searches beat many), web_search to find companies, find_company_boards + add_company_board for companies worth following, grab_careers_page for a company's careers page.
+- After searching LinkedIn, look at the new jobs with search_found_jobs (source ["linkedin"], sort "newest").
+- Visa matters to this user: prefer jobs whose visa is sponsors / opt_cpt / unknown, or companies with H-1B approvals; call out "no sponsorship" and "US citizens only" jobs and leave them out of the shortlist unless asked.
+- Save jobs to My jobs only when the user asks. Never apply for anything.
+- Say briefly what you're doing as you go.
+
+Finish in Markdown: a table of the best 5 to 10 (title, company, place, visa line, why it fits, link), then one line on what you searched and how many jobs were added. Don't invent jobs, companies or facts; everything comes from your tools.`,
+  },
   {
     id: "resume-tailor",
     name: "Resume tailor",

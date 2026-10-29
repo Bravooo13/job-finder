@@ -3,7 +3,7 @@
 // time with a pause between them, so it reads at a human pace.
 
 (() => {
-  const { sleep, clean, htmlText, register, sendJobs, summary } = window.JF;
+  const { sleep, clean, htmlText, register, sendJobs, summary, api } = window.JF;
   const DETAIL_PAUSE_MS = 1200;
 
   function jobIdsOnPage() {
@@ -188,6 +188,22 @@
     };
   }
 
+  /** Hands this search to Job Finder, which reads every results page itself: no scrolling here. */
+  async function grabSearch(options, progress) {
+    const pages = Math.max(1, Math.min(10, Number(options.pages) || 1));
+    const start = await api("POST", "/api/grab/linkedin", { searchUrl: location.href, pages, by: options.by || "extension", save: Boolean(options.save) });
+    if (!start.ok) throw new Error(start.data?.error || `Job Finder said ${start.status}`);
+    let run = start.data;
+    while (run.state === "running") {
+      progress(run.message || "Working…");
+      await sleep(3000);
+      const r = await api("GET", `/api/grab/linkedin?id=${encodeURIComponent(run.id)}`);
+      if (r.ok) run = r.data;
+    }
+    if (run.state === "error") throw new Error(run.error || "The grab failed.");
+    return { message: run.message, ...(run.result || {}) };
+  }
+
   async function grabThis(options, progress) {
     const m = /\/jobs\/view\/(?:[^/]*-)?(\d{6,})/.exec(location.pathname);
     const id = m?.[1] || new URL(location.href).searchParams.get("currentJobId");
@@ -203,10 +219,11 @@
     name: "linkedin",
     hello: "On LinkedIn. Grab the jobs in this search, or save the one you're viewing.",
     showOn: () => /^\/jobs\/(search|search-results|collections|view)/.test(location.pathname),
-    actions: { grab, grabThis },
+    actions: { grab, grabSearch, grabThis },
     panelActions: [
       { html: pagesSelect },
-      { id: "grab", label: "Grab jobs on this page", primary: true, options: (root) => ({ pages: root.querySelector("[data-pages]")?.value || 1 }) },
+      { id: "grabSearch", label: "Grab this search (no scrolling)", primary: true, options: (root) => ({ pages: root.querySelector("[data-pages]")?.value || 1 }) },
+      { id: "grab", label: "Grab the jobs shown here", options: (root) => ({ pages: root.querySelector("[data-pages]")?.value || 1 }) },
       { id: "grabThis", label: "Save the job I'm viewing" },
     ],
   });

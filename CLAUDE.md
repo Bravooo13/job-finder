@@ -161,16 +161,26 @@ the API).
    roles with a sponsorship field. Each listing's URL also teaches Job Finder
    the company's board (`learnBoards`), so small companies get scanned
    directly from then on.
-3. **Board learning.** Any job link (Simplify, LinkedIn's "apply on company
+3. **LinkedIn, no scrolling.** `src/lib/grab/linkedin.ts` reads LinkedIn's
+   public (guest) job search and job pages, the ones anyone can open without
+   signing in: `/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=…&location=…&f_TPR=…&start=…`
+   (about 10 cards per request) and `/jobs-guest/jobs/api/jobPosting/{id}`.
+   One request at a time, 1.3–2.3 s apart, one reader app-wide (a queue),
+   jobs already in Job Finder are skipped, and it stops on HTTP 429/999. Give it
+   a LinkedIn search URL (its keywords, location, geoId and `f_*` filters are
+   kept) or keywords + location. Saved searches with the `linkedin` source run
+   up to 6 title × place queries (past week, ≤ 60 job pages per run). Parsing is
+   in `linkedin-html.ts` (pure, tested). No LinkedIn login is used.
+4. **Board learning.** Any job link (Simplify, LinkedIn's "apply on company
    site", Handshake, a careers page) that points at a known ATS becomes a
    `company_boards` row once verified.
-4. **The browser.** The extension (or an agent in the owner's Chrome) reads
+5. **The browser.** The extension (or an agent in the owner's Chrome) reads
    LinkedIn/Handshake results and job pages and sends them to
    `POST /api/grab`. Careers pages go to `POST /api/grab/page`, which reads
    schema.org `JobPosting` JSON-LD, learns linked ATS boards, and as a last
    resort asks the AI to list the openings. Given only a URL, the app fetches
    the page itself (public hosts only).
-5. **Scoring.** `src/lib/search/match.ts` scores each posting 0–100 against a
+6. **Scoring.** `src/lib/search/match.ts` scores each posting 0–100 against a
    search (titles, keywords from the resume, level, location) and flags
    "N+ years" and visa red flags. Grabbed jobs are scored against every saved
    search and keep the best score.
@@ -181,7 +191,8 @@ the API).
 (web pages can't reach localhost). Content scripts:
 
 - `sites/linkedin.js` (www.linkedin.com): on job search and collection pages,
-  "Grab jobs on this page" scrolls the list so every card loads, reads each job
+  "Grab this search (no scrolling)" hands the page's URL to
+  `/api/grab/linkedin`; "Grab the jobs shown here" scrolls the list so every card loads, reads each job
   from LinkedIn's public job page (`/jobs-guest/jobs/api/jobPosting/{id}`, one
   every ~1.5 s, stops on HTTP 429), picks up the company's offsite apply link
   and can follow "next page". "Save the job I'm viewing" saves one job.
@@ -224,6 +235,7 @@ without an Origin (curl, the MCP server) and from the extension are allowed.
 | `GET /api/jobs?status=a,b`, `GET/PATCH /api/jobs/:id {status, note}` | My jobs |
 | `POST /api/grab` | `{ source: linkedin/handshake/indeed/web, pageUrl, by: "agent", save?, jobs: [{url, title, company, location?, description?, postedAt?, salary?, jobType?, workplace?, industry?, workAuth?, applyUrl?, deadline?}] }` (≤200) |
 | `POST /api/grab/page` | `{ url, title?, html?, text?, links?: [{text, href}], company?, useAi?, save?, by? }` |
+| `POST /api/grab/linkedin` | `{ searchUrl? \| keywords?+location?, postedDays?, remote?, ids?, pages? (1–10), save?, wait? (s) }` → a background run; `GET /api/grab/linkedin?id=` for progress and the result |
 | `GET /api/grab/runs` | Recent grab batches |
 | `GET /api/companies?q=`, `POST /api/companies` | Find / add a company board |
 | `GET/POST /api/searches`, `POST /api/searches/:id/run` | Searches; start a run |
@@ -250,7 +262,7 @@ claude mcp add job-finder -- node "$HOME/Desktop/Job-Finder/mcp/server.mjs"
 Tools: `job_finder_status`, `search_found_jobs`, `get_found_job`,
 `save_found_job`, `dismiss_found_job`, `list_my_jobs`, `get_my_job`,
 `update_my_job`, `send_grabbed_jobs`, `grab_page`, `find_company_boards`,
-`add_company_board`, `list_searches`, `run_search`, `apply_queue`,
+`add_company_board`, `grab_linkedin`, `list_searches`, `run_search`, `apply_queue`,
 `get_apply_profile`, `answer_application_fields`, `write_application_answer`,
 `get_resume_pdf` / `get_cover_letter_pdf` (saved to a temp file; the path is
 for a browser tool's file upload), `mark_applied`. See `mcp/README.md`.
@@ -271,7 +283,12 @@ Ground rules:
 - Answers come from **My answers** (`get_apply_profile`) and the resume, never
   invented. When unsure, leave the field and flag it.
 
-**Grab from LinkedIn / Handshake.** Open the search the owner wants (for
+**Grab from LinkedIn (no scrolling).** Call `grab_linkedin` (or POST
+`/api/grab/linkedin`) with the search URL the owner has open, or with
+keywords + location + postedDays, and `pages` (1–3 is plenty). It takes about a
+minute per page of 25. You don't need to drive the page.
+
+**Grab from Handshake** (needs his signed-in browser). Open the search the owner wants (for
 example LinkedIn Jobs, "data science intern", Chicago, past week; on
 Handshake, turn on "Open to US visa sponsorship" when it fits). With the
 extension loaded, run
@@ -388,6 +405,9 @@ widths and look for console errors. Extension scripts should pass
   any-page grabbing, agent hook.
 - Apply page (queue, My answers, extension setup), answer engine, resume and
   cover-letter PDFs for upload, AI answers to open questions.
+- LinkedIn without scrolling: Job Finder reads LinkedIn's public job search
+  itself (search URL or keywords), saved searches include LinkedIn, an MCP
+  tool `grab_linkedin`, and a "Grab this search" button in the extension.
 - My answers: "Where and how you want to work" (preferred offices in order,
   work arrangement, relocation, travel) and one-click common questions; saved
   answers now match only the same question ("…with Python?" ≠ "…with SQL?").

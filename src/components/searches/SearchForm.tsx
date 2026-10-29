@@ -17,9 +17,9 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { PROVIDER_LABELS, PROVIDERS, type Provider } from "@/lib/boards/types";
+import { PROVIDER_LABELS } from "@/lib/boards/types";
 import { createSearch, keywordsFromResume, updateSearch } from "@/lib/search/actions";
-import { splitLines, splitList, TITLE_PRESETS, type SearchFormValues } from "@/lib/search/schema";
+import { SEARCH_SOURCES, splitLines, splitList, TITLE_PRESETS, type SearchFormValues, type SearchSource } from "@/lib/search/schema";
 import { cn } from "@/lib/utils";
 
 const LEVELS = [
@@ -259,13 +259,13 @@ export function SearchForm({
             ))}
           </div>
           <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {PROVIDERS.map((p) => (
+            {SEARCH_SOURCES.map((p) => (
               <Check
                 key={p}
                 id={f(`src-${p}`)}
-                label={PROVIDER_LABELS[p]}
+                label={p === "linkedin" ? "LinkedIn (public job search)" : PROVIDER_LABELS[p]}
                 checked={v.sources.includes(p)}
-                onChange={(on) => set("sources", toggle<Provider>(v.sources, p, on))}
+                onChange={(on) => set("sources", toggle<SearchSource>(v.sources, p, on))}
               />
             ))}
           </div>
