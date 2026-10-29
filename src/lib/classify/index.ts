@@ -9,7 +9,7 @@ import { classifyRole, type RoleTypeId } from "./role";
 import { classifyVisa, type VisaStatus } from "./visa";
 
 /** Bump when the rules change so stored jobs are classified again. */
-export const CLASS_VERSION = 2;
+export const CLASS_VERSION = 3;
 
 export interface ClassifyInput {
   title: string;

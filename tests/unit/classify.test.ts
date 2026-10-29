@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { classifyIndustry } from "@/lib/classify/industry";
 import { classifyRole } from "@/lib/classify/role";
 import { classifyVisa, sentenceAround } from "@/lib/classify/visa";
 
@@ -31,4 +32,14 @@ test("role types from titles", () => {
   assert.equal(classifyRole("Data Science Intern"), "data-science");
   assert.equal(classifyRole("Software Engineer, Trading Systems"), "software");
   assert.equal(classifyRole("Quantitative Researcher"), "quant");
+});
+
+test("industry from a description", () => {
+  const intern = "We hire university students for our summer program. Candidates must be enrolled in a college or university. Students will learn from academic mentors.";
+  assert.notEqual(classifyIndustry({ company: "Acme Logistics Co", description: intern }), "education");
+  assert.equal(
+    classifyIndustry({ company: "Gamma Holdings", description: "Gamma is a proprietary trading firm and market maker. Our trading firm uses quantitative trading." }),
+    "quant",
+  );
+  assert.equal(classifyIndustry({ company: "Delta Learning", description: "An edtech company building curriculum tools for teachers and learners." }), "education");
 });

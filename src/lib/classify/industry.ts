@@ -141,7 +141,8 @@ const TEXT_RULES: [IndustryId, RegExp][] = [
   ["hardware", /\b(semiconductors?|robotics?|hardware|autonomous vehicles?|chips?|firmware|drones?|manufacturing automation)\b/gi],
   ["tech", /\b(software|SaaS|cloud|platform|developers?|machine learning platform|internet|app|AI company|open[- ]source)\b/gi],
   ["government", /\b(federal agency|government agency|public sector|federal government|state agency|municipal)\b/gi],
-  ["education", /\b(university|universities|college|students|research institute|school district|academic)\b/gi],
+  // Not "university" or "students": internship postings mention them everywhere.
+  ["education", /\b(higher education|K-12|edtech|education technology|school district|research institute|learners|teachers|curriculum|our students)\b/gi],
   ["energy", /\b(energy|utility|utilities|oil and gas|renewables?|solar|wind power|power grid|electricity)\b/gi],
   ["consumer", /\b(retail\w*|consumer (?:goods|products|brands)|CPG|e-?commerce|shoppers|stores|restaurants?|beverages?)\b/gi],
   ["media", /\b(media|entertainment|streaming|games?|gaming|studios?|publishing|broadcast\w*)\b/gi],

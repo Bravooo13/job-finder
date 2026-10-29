@@ -86,12 +86,18 @@ export async function startSearchRun(searchId: string, trigger: "manual" | "sche
   const search = await db.query.searches.findFirst({ where: eq(searches.id, searchId) });
   if (!search) throw new Error("Search not found.");
 
-  const [run] = await db
-    .insert(searchRuns)
-    .values({ searchId, trigger, errors: [], status: "running" })
-    .returning({ id: searchRuns.id });
   const controller = new AbortController();
   active.set(searchId, controller);
+  let run: { id: string };
+  try {
+    [run] = await db
+      .insert(searchRuns)
+      .values({ searchId, trigger, errors: [], status: "running" })
+      .returning({ id: searchRuns.id });
+  } catch (error) {
+    active.delete(searchId);
+    throw error;
+  }
 
   void executeRun(search, run.id, controller.signal)
     .catch(async (error) => {
@@ -290,16 +296,31 @@ async function saveFound(searchId: string, found: Found[]): Promise<number> {
 
 /** Marks runs left "running" by a previous app session as stopped. */
 export async function cleanUpStaleRuns() {
-  const running = await db
-    .select({ id: searchRuns.id, searchId: searchRuns.searchId, startedAt: searchRuns.startedAt })
-    .from(searchRuns)
-    .where(eq(searchRuns.status, "running"));
-  for (const r of running) {
-    // Only runs from before this app session; current ones are still going.
-    if (active.has(r.searchId) || r.startedAt.getTime() >= sessionStartedAt) continue;
+  const progress = () =>
+    db
+      .select({
+        id: searchRuns.id,
+        searchId: searchRuns.searchId,
+        startedAt: searchRuns.startedAt,
+        boardsDone: searchRuns.boardsDone,
+        postingsSeen: searchRuns.postingsSeen,
+      })
+      .from(searchRuns)
+      .where(eq(searchRuns.status, "running"));
+  // Only runs from before this app session; current ones are still going.
+  const candidates = (await progress()).filter((r) => !active.has(r.searchId) && r.startedAt.getTime() < sessionStartedAt);
+  if (!candidates.length) return;
+  // A run that is still making progress is alive (it may belong to another
+  // module instance after a hot reload), so give it a moment to show that.
+  await new Promise((resolve) => setTimeout(resolve, 20_000));
+  const now = new Map((await progress()).map((r) => [r.id, r]));
+  for (const r of candidates) {
+    const later = now.get(r.id);
+    if (!later || active.has(r.searchId)) continue;
+    if (later.boardsDone !== r.boardsDone || later.postingsSeen !== r.postingsSeen) continue;
     await db
       .update(searchRuns)
       .set({ status: "stopped", message: "The app was closed while this search was running.", finishedAt: new Date() })
-      .where(eq(searchRuns.id, r.id));
+      .where(and(eq(searchRuns.id, r.id), eq(searchRuns.status, "running")));
   }
 }
