@@ -32,14 +32,18 @@ export interface FormField {
   required?: boolean;
   placeholder?: string;
   maxLength?: number;
+  /** The element's id or name ("school--0", "question_123"): a clue when labels repeat, like Greenhouse's education rows. */
+  hint?: string;
+  /** A dropdown or list of checkboxes that takes several answers. */
+  multiple?: boolean;
 }
 
 export type Confidence = "high" | "medium" | "low";
 
 export interface FieldAnswer {
   key: string;
-  /** Text to type, the option to pick, true/false for a single checkbox, or null to leave alone. */
-  value: string | boolean | null;
+  /** Text to type, the option to pick (several for a multi-select), true/false for a single checkbox, or null to leave alone. */
+  value: string | boolean | string[] | null;
   confidence: Confidence;
   /** Which rule answered it, for review. */
   rule: string;
@@ -48,14 +52,28 @@ export interface FieldAnswer {
   file?: "resume" | "cover_letter";
   /** An open question that needs a written answer (the AI can draft it). */
   needsWriting?: boolean;
+  /** Other wordings to try in a type-to-search dropdown when the first one finds nothing. */
+  alts?: string[];
+  /** A consent, acknowledgment or "I certify" question. */
+  consent?: boolean;
 }
 
 export interface AnswerContext {
   company?: string;
   jobTitle?: string;
+  /** Where the job is ("Chicago, IL"), for "Do you live near the office?" questions. */
+  jobLocation?: string;
   coverLetter?: string;
   /** Answers you or the AI wrote for this job before, by question. */
   saved?: { question: string; answer: string }[];
+  /** You allowed Auto apply to tick consent, acknowledgment and "I certify" boxes for you. */
+  consent?: boolean;
+  /** Skills from your master resume, for "Which tools have you used?" lists. */
+  skills?: string[];
+  /** Places you've worked, from your master resume, for "Have you worked here before?". */
+  employers?: string[];
+  /** Greenhouse education row numbers on this form, in order (filled in by answerFields). */
+  educationRows?: number[];
 }
 
 // ------------------------------------------------------------------ helpers
@@ -134,6 +152,107 @@ function monthYear(ym: string): string {
   return `${names[Number(m[2]) - 1] ?? ""} ${m[1]}`.trim();
 }
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** "December 2027" → 202712, "Spring 2028" → 202805, "05/2028" → 202805. */
+function yearMonthIn(s: string): number[] {
+  const out: { at: number; v: number }[] = [];
+  for (const m of s.matchAll(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,? (\d{4})\b/g)) out.push({ at: m.index!, v: Number(m[2]) * 100 + MONTHS.indexOf(m[1]) + 1 });
+  const SEASON: Record<string, number> = { spring: 5, summer: 8, fall: 12, autumn: 12, winter: 12 };
+  for (const m of s.matchAll(/\b(spring|summer|fall|autumn|winter) (\d{4})\b/g)) out.push({ at: m.index!, v: Number(m[2]) * 100 + SEASON[m[1]] });
+  for (const m of s.matchAll(/\b(\d{1,2})\/(\d{4})\b/g)) out.push({ at: m.index!, v: Number(m[2]) * 100 + Number(m[1]) });
+  return out.sort((a, b) => a.at - b.at).map((x) => x.v);
+}
+const ym = (s: string) => {
+  const m = /^(\d{4})-(\d{2})/.exec(s);
+  return m ? Number(m[1]) * 100 + Number(m[2]) : null;
+};
+
+/** The option of a GPA dropdown ("3.5+", "3.0-3.49", "2.49 or below", "No GPA") that holds your GPA. */
+export function gpaOption(options: string[], gpa: string): string | null {
+  const g = Number.parseFloat(gpa);
+  if (!Number.isFinite(g)) return chooseOption(options, "no gpa") ?? chooseOption(options, "n/a");
+  for (const o of options) {
+    const s = o.toLowerCase().replace(/\s+/g, " ");
+    const nums = [...s.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number.parseFloat(m[0])).filter((n) => n <= 5);
+    if (!nums.length) continue;
+    if (nums.length >= 2 && /\d\s*(?:-|–|—|to|through)\s*\d/.test(s)) {
+      const [a, b] = [Math.min(nums[0], nums[1]), Math.max(nums[0], nums[1])];
+      // "3.0-3.49" holds 3.495 too: the top is rounded to its decimals.
+      if (g >= a - 1e-9 && g < b + 0.005) return o;
+      continue;
+    }
+    if (/\+|above|or (higher|more|greater|above)|and (up|above|higher|over)|at least|greater than|over/.test(s)) {
+      if (g >= nums[0] - 1e-9) return o;
+      continue;
+    }
+    if (/below|or (lower|less|under)|under|less than/.test(s)) {
+      if (g < nums[0] || (/or (lower|less|below|under)/.test(s) && g <= nums[0] + 1e-9)) return o;
+    }
+  }
+  return null;
+}
+
+/** Ways a form may spell your degree: "M.S." is "Master of Science" and "Master's Degree". */
+export function degreeAliases(degree: string): string[] {
+  const d = degree.trim();
+  if (!d) return [];
+  const s = d.toLowerCase().replace(/\./g, "").replace(/'/g, "");
+  const out = [d];
+  if (/^mba\b/.test(s)) out.push("MBA", "Master of Business Administration", "Master's Degree", "Masters");
+  else if (/^(ms|msc|mse|meng|ma|mfa|mph|mpp|master)/.test(s)) {
+    out.push(/^ma\b|arts/.test(s) ? "Master of Arts" : "Master of Science", "Master's Degree", "Masters Degree", "Master's", "Masters", "Master");
+  } else if (/^(ba|ab|bs|bsc|bse|beng|bba|bachelor)/.test(s)) {
+    out.push(/^(ba|ab)\b|arts/.test(s) ? "Bachelor of Arts" : "Bachelor of Science", "Bachelor's Degree", "Bachelors Degree", "Bachelor's", "Bachelors", "Bachelor");
+  } else if (/^(phd|doctor)/.test(s)) out.push("Doctor of Philosophy", "Ph.D.", "PhD", "Doctorate");
+  return [...new Set(out)];
+}
+
+/** "Applied Data Science" can also be found as "Data Science". */
+function majorAliases(major: string): string[] {
+  const m = major.trim();
+  if (!m) return [];
+  const out = [m];
+  const words = m.split(/\s+/);
+  if (words.length >= 3) out.push(words.slice(1).join(" "));
+  if (/^(applied|computational|quantitative) /i.test(m)) out.push(m.replace(/^\S+ /, ""));
+  return [...new Set(out)];
+}
+
+const degreeOf = (title: string) => title.split(/,| in /i)[0]?.trim() ?? "";
+const majorOf = (title: string) => /\bin\s+([^,(]+)/i.exec(title)?.[1]?.trim() ?? "";
+const splitList = (s: string) => s.split(/[;\n,]| and /).map((x) => x.trim()).filter(Boolean);
+
+const companyKey = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\b(inc|llc|ltd|corp|corporation|company|co|group|holdings|the|lp|llp|plc)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+const sameCompany = (a: string, b: string) => {
+  const x = companyKey(a);
+  const y = companyKey(b);
+  return Boolean(x && y && (x === y || (x.length >= 4 && y.startsWith(x + " ")) || (y.length >= 4 && x.startsWith(y + " "))));
+};
+
+const sameSkill = (skill: string, option: string) => {
+  const a = skill.toLowerCase().trim();
+  const b = option.toLowerCase().replace(/\(.*?\)/g, "").trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length <= 2 || b.length <= 2) return false; // "R", "C": exact only
+  return new RegExp(`(^|[^a-z0-9+#])${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9+#])`).test(a) || new RegExp(`(^|[^a-z0-9+#])${a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9+#])`).test(b);
+};
+
+/** Options that all mean "I acknowledge" ("Acknowledged", "I agree", "Yes, I certify"). */
+const ACK_OPTION = /^(acknowledged?|i acknowledge|i agree|agreed?|i accept|accept(ed)?|i understand|understood|i certify|certified|i consent|i confirm|confirm(ed)?|yes,? i (agree|understand|acknowledge|certify|accept|consent|confirm|have read))\b/i;
+const MARKETING =
+  /(newsletter|marketing|promotional|job alerts?|talent (community|network|pool)|future (job )?(opportunities|openings|roles)|keep (me|you) (informed|updated|in mind)|receive (emails?|updates|news|communications|offers))/;
+const CONSENT_Q =
+  /\bi (hereby )?certify|certify that|\battest|by (checking|clicking|selecting|ticking|submitting)|i (have read|acknowledge|understand and agree|agree|consent)|\backnowledg|\bconsent\b|agree to|privacy (policy|notice|statement)|terms (and|&) conditions|terms of (use|service)|review (our|the) .{0,40}polic|accurate and complete|true,? (complete|correct|and accurate)/;
+
 // -------------------------------------------------------------------- rules
 
 interface Rule {
@@ -174,7 +293,66 @@ const RULES: Rule[] = [
     answer: () => ({ value: null, confidence: "low", note: "Attach this yourself (transcript, portfolio, …)" }),
   },
 
+  // ---- Greenhouse's education rows (school--0, degree--0, start-month--0, …): labels repeat, the id says which
+  {
+    id: "education-row",
+    test: (_q, f) => /^(school|degree|discipline|start-month|start-year|end-month|end-year)--\d+$/.test(f.hint ?? ""),
+    answer: (p, f, _q, ctx) => {
+      const [, part, n] = /^([a-z-]+)--(\d+)$/.exec(f.hint!)!;
+      const row = (ctx.educationRows ?? [Number(n)]).indexOf(Number(n));
+      const e =
+        row === 0
+          ? { school: p.school, degree: p.degree, major: p.major, start: p.schoolStart, end: p.graduation }
+          : row === 1
+            ? { school: p.previousSchool, degree: degreeOf(p.previousDegree), major: p.previousMajor || majorOf(p.previousDegree), start: p.previousStart, end: p.previousGraduation }
+            : null;
+      if (!e) return { value: null, confidence: "high", note: "Extra education row" };
+      if (part === "school") return pickOrText(f, [e.school]);
+      if (part === "degree") return pickOrText(f, degreeAliases(e.degree));
+      if (part === "discipline") return pickOrText(f, majorAliases(e.major));
+      const date = part.startsWith("start") ? e.start : e.end;
+      const m = /^(\d{4})-(\d{2})/.exec(date);
+      if (!m) return { value: null, confidence: part.startsWith("start") ? "high" : "low", note: date ? undefined : "Add the dates to your resume or My answers" };
+      return part.endsWith("year") ? { value: m[1], confidence: "high" } : pickOrText(f, [MONTH_NAMES[Number(m[2]) - 1]]);
+    },
+  },
+
+  // ---- messages and opt-ins (before email/phone and consent: these mention both)
+  {
+    id: "text-messages",
+    test: (q, f) => (isChoice(f) || f.type === "checkbox") && /\b(sms|text messages?|texting|whatsapp)\b/.test(q),
+    answer: (p) => yn(p.textMessages || "no", "high", p.textMessages ? undefined : "Text updates: no (change it in My answers)"),
+  },
+  {
+    id: "marketing-opt-in",
+    test: (q, f) => (isChoice(f) || f.type === "checkbox") && MARKETING.test(q),
+    answer: (_p, f) => (f.type === "checkbox" && (f.options?.length ?? 0) <= 1 ? { value: false, confidence: "high", note: "Left unticked" } : yn("no")),
+  },
+  {
+    id: "consent",
+    test: (q, f) =>
+      (f.type === "checkbox" || isChoice(f)) &&
+      (CONSENT_Q.test(q) || (!!f.options?.length && f.options.filter((o) => o.trim() && !/^(select|choose)/i.test(o.trim())).every((o) => ACK_OPTION.test(o.trim())))),
+    answer: (_p, f, _q, ctx) => {
+      if (!ctx.consent) return { value: null, confidence: "low", consent: true, note: "Read this and tick it yourself, or let Auto apply do it (its settings)" };
+      if (f.type === "checkbox" && (f.options?.length ?? 0) <= 1) return { value: true, confidence: "high", consent: true, note: "Ticked: you let Auto apply accept these" };
+      const opts = f.options?.filter((o) => o.trim() && !/^(select|choose)/i.test(o.trim())) ?? [];
+      const pick = opts.find((o) => ACK_OPTION.test(o.trim())) ?? chooseOption(opts, "yes") ?? (opts.length === 1 ? opts[0] : null);
+      return pick ? { value: f.type === "checkbox" ? [pick] : pick, confidence: "high", consent: true } : { value: null, confidence: "low", consent: true, note: "Pick the “I agree” option yourself" };
+    },
+  },
+
   // ---- legal: sponsorship and work authorization (order matters)
+  {
+    id: "sponsored-status",
+    test: (q) => /(currently|presently) (in|on|hold(ing)?) (one of )?(these|the following|a|any)? ?(sponsored|employer[- ]sponsored|work) (visa )?status/.test(q) || /\b(o-?1|tn|e-?3|h-?1b1?)\b.{0,30}\b(h-?1b|o-?1|tn|e-?3)\b/.test(q),
+    answer: (p) => (p.visaStatus ? yn(/\b(h-?1b|o-?1|tn|e-?3|l-?1)\b/i.test(p.visaStatus) ? "yes" : "no") : yn("")),
+  },
+  {
+    id: "student-status",
+    test: (q) => /\b(f-?1|j-?1)\b.{0,60}status|(student|trainee|exchange visitor) (visa|status)/.test(q),
+    answer: (p) => (p.visaStatus ? yn(/f-?1|j-?1|student|opt|cpt/i.test(p.visaStatus) ? "yes" : "no") : yn("")),
+  },
   {
     id: "sponsorship",
     test: (q) =>
@@ -213,10 +391,10 @@ const RULES: Rule[] = [
     answer: (p, f) => {
       if (!p.visaStatus) return textAnswer("");
       if (isChoice(f) && f.options?.length) {
-        const pick =
-          chooseOption(f.options, p.visaStatus) ??
-          (/f-?1/i.test(p.visaStatus) ? chooseOption(f.options, "F-1") ?? chooseOption(f.options, "student visa") : null) ??
-          chooseOption(f.options, "other");
+        const f1 = /f-?1/i.test(p.visaStatus) ? f.options.find((o) => /\bf-?1\b/i.test(o)) : undefined;
+        const exact = f1 ?? chooseOption(f.options, p.visaStatus);
+        if (exact) return { value: exact, confidence: "high" };
+        const pick = (/f-?1/i.test(p.visaStatus) ? chooseOption(f.options, "student visa") : null) ?? chooseOption(f.options, "other");
         return pick ? { value: pick, confidence: "medium" } : textAnswer("", "low", `Pick the option for ${p.visaStatus}`);
       }
       return textAnswer(p.visaStatus);
@@ -254,6 +432,18 @@ const RULES: Rule[] = [
   },
 
   // ---- where and how you want to work
+  {
+    id: "near-office",
+    test: (q) => /within (a |an )?\d+[- ]?(mile|km|kilomet)|\bmile radius|live (within|near|close to|in the area)|commut(e|able|ing) (distance|to)|reside (in|near|within)|location requirement|relocate (to the area )?before/.test(q),
+    answer: (p, _f, _q, ctx) => {
+      const here = [p.city, ...p.preferredLocations.split(/[;\n]/)].map((s) => s.split(",")[0]?.trim().toLowerCase()).filter(Boolean);
+      const job = (ctx.jobLocation ?? "").toLowerCase();
+      if (job && here.some((c) => job.includes(c!))) return yn("yes", "high", `You're in ${p.city || "that city"}`);
+      if (p.willingToRelocate === "yes") return yn("yes", "high", "You're willing to relocate");
+      if (p.willingToRelocate === "no") return yn("no", "medium");
+      return yn("", "low", "Set “Willing to relocate” in My answers");
+    },
+  },
   {
     id: "location-preference",
     test: (q) =>
@@ -305,8 +495,8 @@ const RULES: Rule[] = [
   },
 
   // ---- contact
-  { id: "first-name", test: (q) => /^(legal )?first name|given name|^first$/.test(q), answer: (p) => textAnswer(p.firstName) },
-  { id: "last-name", test: (q) => /^(legal )?last name|surname|family name|^last$/.test(q), answer: (p) => textAnswer(p.lastName) },
+  { id: "first-name", test: (q, f) => !isChoice(f) && /(^|your )(legal )?first name|given name|^first$/.test(q), answer: (p) => textAnswer(p.firstName) },
+  { id: "last-name", test: (q, f) => !isChoice(f) && /(^|your )(legal )?last name|surname|family name|^last$/.test(q), answer: (p) => textAnswer(p.lastName) },
   {
     id: "preferred-name",
     test: (q) => /preferred (first )?name|nickname|name you go by/.test(q),
@@ -318,13 +508,13 @@ const RULES: Rule[] = [
     answer: (p) => textAnswer([p.firstName, p.lastName].filter(Boolean).join(" ")),
   },
   { id: "pronouns", test: (q) => /pronoun/.test(q), answer: (p, f) => (p.pronouns ? choiceOrText(f, p.pronouns) : { value: null, confidence: "low", note: "Optional" }) },
-  { id: "email", test: (q, f) => f.type === "email" || /e-?mail/.test(q), answer: (p) => textAnswer(p.email) },
+  { id: "email", test: (q, f) => !isChoice(f) && f.type !== "checkbox" && (f.type === "email" || /e-?mail/.test(q)), answer: (p) => textAnswer(p.email) },
   {
     id: "phone-type",
     test: (q, f) => /phone/.test(q) && /type|device/.test(q) && isChoice(f),
     answer: (_p, f) => ({ value: f.options?.length ? chooseOption(f.options, "mobile") ?? chooseOption(f.options, "cell") : "Mobile", confidence: "high" }),
   },
-  { id: "phone", test: (q, f) => f.type === "tel" || /phone|mobile|cell/.test(q), answer: (p) => textAnswer(p.phone) },
+  { id: "phone", test: (q, f) => !isChoice(f) && f.type !== "checkbox" && (f.type === "tel" || /phone|mobile|cell/.test(q)), answer: (p) => textAnswer(p.phone) },
   { id: "linkedin", test: (q) => /linkedin/.test(q), answer: (p) => textAnswer(p.linkedin) },
   { id: "github", test: (q) => /github|git hub/.test(q), answer: (p) => textAnswer(p.github) },
   {
@@ -354,9 +544,38 @@ const RULES: Rule[] = [
     test: (q) => /(school|university|college|institution)( name)?$|which (school|university)|attending/.test(q) && !/high school/.test(q),
     answer: (p, f) => choiceOrText(f, p.school),
   },
-  { id: "degree", test: (q) => /degree|level of education|highest education/.test(q), answer: (p, f) => choiceOrText(f, p.degree) },
-  { id: "major", test: (q) => /major|field of study|discipline|concentration|area of study/.test(q), answer: (p, f) => choiceOrText(f, p.major) },
-  { id: "gpa", test: (q) => /\bgpa\b|grade point/.test(q), answer: (p) => textAnswer(p.gpa, "high", p.gpa ? undefined : "Leave blank or add your GPA in My answers") },
+  { id: "degree", test: (q) => /degree|level of education|highest education/.test(q), answer: (p, f) => pickOrText(f, degreeAliases(p.degree)) },
+  { id: "major", test: (q) => /major|field of study|discipline|concentration|area of study/.test(q), answer: (p, f) => pickOrText(f, majorAliases(p.major)) },
+  {
+    id: "gpa",
+    test: (q) => /\bgpa\b|grade point/.test(q),
+    answer: (p, f) => {
+      if (isChoice(f) && f.options?.length) {
+        const pick = gpaOption(f.options, p.gpa);
+        return pick ? { value: pick, confidence: "high" } : { value: null, confidence: "low", note: p.gpa ? `No option holds ${p.gpa}` : "Add your GPA in My answers" };
+      }
+      return textAnswer(p.gpa, "high", p.gpa ? undefined : "Leave blank or add your GPA in My answers");
+    },
+  },
+  {
+    id: "graduation-window",
+    test: (q, f) => /graduat/.test(q) && (isChoice(f) || f.type === "checkbox") && (/\b(between|before|by|no later than|after|in) /.test(q) && (yearMonthIn(q).length > 0 || /\b20\d\d\b/.test(q))),
+    answer: (p, f, q) => {
+      const grad = ym(p.graduation);
+      if (!grad) return yn("", "low", "Add your graduation date in My answers");
+      if (f.options?.length && !f.options.some((o) => YES_RE.test(o.trim()))) return null; // a list of dates: the graduation rule picks one
+      const dates = yearMonthIn(q);
+      let ok: boolean | null = null;
+      if (/between/.test(q) && dates.length >= 2) ok = grad >= Math.min(dates[0], dates[1]) && grad <= Math.max(dates[0], dates[1]);
+      else if (/(before|by|no later than)/.test(q) && dates.length) ok = grad <= dates[0];
+      else if (/after/.test(q) && dates.length) ok = grad >= dates[0];
+      else {
+        const year = /\b(20\d\d)\b/.exec(q)?.[1];
+        if (year) ok = String(grad).startsWith(year);
+      }
+      return ok === null ? null : yn(ok ? "yes" : "no", "high", `You graduate ${monthYear(p.graduation)}`);
+    },
+  },
   {
     id: "graduation",
     test: (q) => /graduat|completion date|class of|expected (end|finish)/.test(q),
@@ -396,14 +615,11 @@ const RULES: Rule[] = [
     test: (q) => /how did you (hear|find|learn)|where did you (hear|find|see|learn)|referral source|source of (application|referral)|how were you referred/.test(q),
     answer: (p, f) => {
       const wanted = p.hearAbout || "LinkedIn";
-      if (!isChoice(f) || !f.options?.length) return textAnswer(wanted, isChoice(f) ? "medium" : "high");
+      if (!isChoice(f) || !f.options?.length) return { ...textAnswer(wanted), alts: ["LinkedIn", "Job board", "Company website", "Other"] };
+      const best = chooseOption(f.options, wanted) ?? (/linkedin/i.test(wanted) ? f.options.find((o) => /linkedin/i.test(o) && !/peer|referral|recruiter/i.test(o)) : null);
+      if (best) return { value: best, confidence: "high" };
       return {
-        value:
-          chooseOption(f.options, wanted) ??
-          chooseOption(f.options, "linkedin") ??
-          chooseOption(f.options, "job board") ??
-          chooseOption(f.options, "company website") ??
-          chooseOption(f.options, "other"),
+        value: chooseOption(f.options, "linkedin") ?? chooseOption(f.options, "job board") ?? chooseOption(f.options, "company website") ?? chooseOption(f.options, "other"),
         confidence: "medium",
       };
     },
@@ -414,27 +630,63 @@ const RULES: Rule[] = [
     answer: () => ({ value: null, confidence: "high", note: "Fill in if someone referred you" }),
   },
   {
-    id: "worked-here",
-    test: (q) => /previously (been )?(employed|worked)|worked (for|at|with) .{0,40}(before|previously)|former employee|ever (been )?employed by/.test(q),
-    answer: (p) => yn(p.workedHereBefore || "no"),
+    id: "client-relationship",
+    test: (q) => /\bclients? of\b|professional relationship with|(worked|work) (for|with) (one of )?(our|its) clients/.test(q),
+    answer: (p) => declaration(p.clientRelationship),
   },
-  { id: "relatives", test: (q) => /relatives?|family members? .{0,30}(work|employ)/.test(q), answer: () => yn("no", "medium") },
-  { id: "non-compete", test: (q) => /non-?compete|non-?solicit|restrictive covenant/.test(q), answer: () => yn("no", "medium") },
-  { id: "languages", test: (q) => /languages? (do you|you) speak|which languages|language proficiency/.test(q), answer: (p, f) => choiceOrText(f, p.languages, "medium") },
+  {
+    id: "worked-here",
+    test: (q) => /previously (been )?(employed|worked)|worked (for|at|with) .{0,40}(before|previously)|former employee|ever (been )?employed by|have you (ever )?worked (for|at) /.test(q),
+    answer: (p, _f, _q, ctx) => {
+      if (ctx.company && ctx.employers?.some((e) => sameCompany(e, ctx.company!))) return yn("yes", "high", "It's on your resume");
+      if (p.workedHereBefore) return yn(p.workedHereBefore);
+      return yn("no", ctx.employers?.length ? "high" : "medium", ctx.employers?.length ? "Not on your resume" : undefined);
+    },
+  },
+  {
+    id: "relatives",
+    test: (q) => /relatives?\b|related to (a|an|any|someone|anyone)\b|family members? .{0,30}(work|employ)|(spouse|partner|family) .{0,30}(employee|works? (for|at|here))/.test(q),
+    answer: (p) => declaration(p.relatedToEmployee),
+  },
+  {
+    id: "non-compete",
+    test: (q) => /non-?compete|non-?solicit|restrictive covenant|post-employment (restriction|obligation|covenant)|(agreement|obligation)s? .{0,80}(affect|restrict|prevent|limit) .{0,40}(abilit|perform|work)/.test(q),
+    answer: (p) => declaration(p.restrictiveAgreement),
+  },
+  {
+    id: "languages",
+    test: (q) => /languages? (do you|you) speak|which languages|language (proficiency|fluency|skills)|fluent in|^languages?( spoken)?$/.test(q),
+    answer: (p, f) => {
+      const langs = splitList(p.languages);
+      if (!langs.length) return textAnswer("", "low", "Add your languages in My answers");
+      if (f.multiple || (f.type === "checkbox" && (f.options?.length ?? 0) > 1)) {
+        if (!f.options?.length) return { value: langs, confidence: "high" };
+        const picks = langs.map((l) => chooseOption(f.options, l)).filter((x): x is string => Boolean(x));
+        return picks.length ? { value: [...new Set(picks)], confidence: "high" } : { value: null, confidence: "low", note: `No option for ${langs.join(", ")}` };
+      }
+      return pickOrText(f, [langs.join(", "), ...langs]);
+    },
+  },
+  {
+    id: "skills-list",
+    test: (q, f) =>
+      (f.multiple || f.type === "checkbox") && (f.options?.length ?? 0) >= 2 && /\b(tools?|software|programming|languages?|technolog|skills?|platforms?|packages?|frameworks?)\b/.test(q) && !/spoken|fluen/.test(q),
+    answer: (_p, f, _q, ctx) => {
+      const picks = (f.options ?? []).filter((o) => (ctx.skills ?? []).some((s) => sameSkill(s, o)));
+      return picks.length
+        ? { value: picks, confidence: "medium", note: "Picked from the skills on your resume" }
+        : { value: null, confidence: "low", note: "None of these are on your resume's skills" };
+    },
+  },
 
   // ---- voluntary self-identification (EEO); default is "decline"
   { id: "eeo-gender", test: (q) => /\bgender\b|\bsex\b/.test(q), answer: (p, f) => eeo(f, p.gender) },
   { id: "eeo-hispanic", test: (q) => /hispanic|latin[oa]/.test(q), answer: (p, f) => eeo(f, p.hispanicLatino) },
-  { id: "eeo-race", test: (q) => /\brace\b|ethnicity/.test(q), answer: (p, f) => eeo(f, p.race) },
+  { id: "eeo-race", test: (q) => /\brac(e|ial)\b|ethnicit/.test(q), answer: (p, f) => eeo(f, p.race) },
   { id: "eeo-veteran", test: (q) => /veteran|military service|armed forces/.test(q), answer: (p, f) => eeo(f, p.veteran) },
   { id: "eeo-disability", test: (q) => /disabilit/.test(q), answer: (p, f) => eeo(f, p.disability) },
 
   // ---- things only you should do
-  {
-    id: "consent",
-    test: (q, f) => (f.type === "checkbox" || isChoice(f)) && /acknowledge|consent|i agree|agree to|certif|attest|privacy (policy|notice)|terms|accurate and complete/.test(q),
-    answer: () => ({ value: null, confidence: "low", note: "Read this and tick it yourself" }),
-  },
   {
     id: "cover-letter-text",
     test: (q, f) => /cover letter/.test(q) && (f.type === "textarea" || f.type === "text"),
@@ -449,7 +701,27 @@ function choiceOrText(f: FormField, value: string, confidence: Confidence = "hig
     const pick = chooseOption(f.options, value);
     return pick ? { value: pick, confidence } : { value: null, confidence: "low", note: `No option matches “${value}”` };
   }
-  return { value, confidence: isChoice(f) ? "medium" : confidence };
+  // A type-to-search dropdown: the browser checks that an option really matches.
+  return { value, confidence: isChoice(f) && f.type !== "combobox" ? "medium" : confidence };
+}
+
+/** The first of several wordings that a dropdown offers; for type-to-search dropdowns, the rest become fallbacks. */
+function pickOrText(f: FormField, candidates: string[], confidence: Confidence = "high"): Omit<FieldAnswer, "key" | "rule"> {
+  const c = candidates.map((x) => x.trim()).filter(Boolean);
+  if (!c.length) return { value: null, confidence: "low", note: "Add this to My answers" };
+  if (isChoice(f) && f.options?.length) {
+    for (const x of c) {
+      const pick = chooseOption(f.options, x);
+      if (pick) return { value: pick, confidence };
+    }
+    return { value: null, confidence: "low", note: `No option matches “${c[0]}”` };
+  }
+  return { value: c[0], confidence, alts: c.length > 1 ? c.slice(1) : undefined };
+}
+
+/** A standard declaration ("related to an employee?"): your saved answer, else "No" held for you to check. */
+function declaration(v: "yes" | "no" | "") {
+  return v ? yn(v) : yn("no", "medium", "Usually No: set it in My answers to skip this check");
 }
 
 function eeo(f: FormField, value: string): Omit<FieldAnswer, "key" | "rule"> {
@@ -466,7 +738,11 @@ const OPEN_QUESTION =
   /\b(why|describe|tell us|explain|what (interests|excites|motivates|draws)|how would you|share (an|a|your)|walk us through|give an example|what makes you|anything else|additional information|in your own words|essay)\b/;
 
 /** Answers every field it understands; the rest come back with value null and a note. */
-export function answerFields(fields: FormField[], profile: ApplyProfile, ctx: AnswerContext = {}): FieldAnswer[] {
+export function answerFields(fields: FormField[], profile: ApplyProfile, context: AnswerContext = {}): FieldAnswer[] {
+  const educationRows = [
+    ...new Set(fields.map((f) => /^school--(\d+)$/.exec(f.hint ?? "")?.[1]).filter((x): x is string => x !== undefined).map(Number)),
+  ].sort((a, b) => a - b);
+  const ctx: AnswerContext = { ...context, educationRows };
   return fields.map((f) => {
     const q = normalizeLabel(`${f.label} ${f.placeholder ?? ""}`.trim());
 
@@ -480,6 +756,7 @@ export function answerFields(fields: FormField[], profile: ApplyProfile, ctx: An
     for (const rule of RULES) {
       if (!rule.test(q, f)) continue;
       const a = rule.answer(profile, f, q, ctx);
+      if (a && Array.isArray(a.value) && !(f.multiple || f.type === "checkbox")) a.value = a.value[0] ?? null;
       if (!a) continue;
       let value = a.value;
       // Yes/no answers for choice fields become the matching option ("Yes, I will require…").

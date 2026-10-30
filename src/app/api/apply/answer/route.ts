@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildSystemPrompt } from "@/lib/ai/context";
+import { forApplying } from "@/lib/ai/models";
 import { AiError, runChat, stripThinking } from "@/lib/ai/providers";
+import { getAiSettings } from "@/lib/ai/settings";
 import { getAgent } from "@/lib/ai/agents";
 import { findJobForUrl, rememberAnswer } from "@/lib/apply/jobs";
 
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
       ],
       maxTokens: agent.maxTokens,
       onText: (t) => (text += t),
-    });
+    }, forApplying(await getAiSettings()));
     let answer = stripThinking(text).replace(/^["“]|["”]$/g, "").trim();
     if (b.maxLength && answer.length > b.maxLength) answer = answer.slice(0, b.maxLength).replace(/\s+\S*$/, "");
     await rememberAnswer(jobId ?? null, b.question, answer, "ai");

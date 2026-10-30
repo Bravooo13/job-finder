@@ -202,9 +202,12 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
           {field("degree", "Degree", { placeholder: "Master of Science" })}
           {field("major", "Major")}
           {field("gpa", "GPA", { placeholder: "Leave blank to skip" })}
+          {field("schoolStart", "Started (YYYY-MM)", { placeholder: "2026-09" })}
           {field("graduation", "Graduation (YYYY-MM)", { placeholder: "2028-05" })}
           {field("previousSchool", "Previous school")}
           {field("previousDegree", "Previous degree")}
+          {field("previousMajor", "Previous major")}
+          {field("previousStart", "Previous start (YYYY-MM)")}
           {field("previousGraduation", "Previous graduation (YYYY-MM)")}
         </CardContent>
       </Card>
@@ -219,7 +222,7 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
             {field("availability", "Availability", { placeholder: "Summer 2027 (June to August)" })}
             {field("salaryExpectation", "Pay expectation", { placeholder: "Leave blank to skip" })}
             {field("hearAbout", "How you heard about jobs", { placeholder: "LinkedIn" })}
-            {field("languages", "Languages")}
+            {field("languages", "Languages", { placeholder: "English; Chinese (Mandarin)" })}
           </div>
           <YesNo label="At least 18 years old" value={p.over18} onChange={(v) => set("over18", v)} />
           <YesNo label="Worked at the company before (default)" value={p.workedHereBefore} onChange={(v) => set("workedHereBefore", v)} />
@@ -245,6 +248,41 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
           />
           <YesNo label="Willing to relocate" value={p.willingToRelocate} onChange={(v) => set("willingToRelocate", v)} />
           <YesNo label="Willing to travel for work" value={p.willingToTravel} onChange={(v) => set("willingToTravel", v)} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Standard declarations</CardTitle>
+          <CardDescription>
+            Forms often ask these. While one is “Not set”, Auto apply answers No but holds the application for you to check.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <YesNo
+            label="Related to someone who works at the company"
+            hint="“Are you related to a current employee?”"
+            value={p.relatedToEmployee}
+            onChange={(v) => set("relatedToEmployee", v)}
+          />
+          <YesNo
+            label="Bound by a non-compete or similar agreement"
+            hint="Non-compete, non-solicitation or post-employment covenants from another employer"
+            value={p.restrictiveAgreement}
+            onChange={(v) => set("restrictiveAgreement", v)}
+          />
+          <YesNo
+            label="Worked for or with one of the company's clients"
+            hint="Consulting firms ask this to check for conflicts"
+            value={p.clientRelationship}
+            onChange={(v) => set("clientRelationship", v)}
+          />
+          <YesNo
+            label="OK to get application updates by text or WhatsApp"
+            hint="Not set counts as No: they email you instead"
+            value={p.textMessages}
+            onChange={(v) => set("textMessages", v)}
+          />
         </CardContent>
       </Card>
 

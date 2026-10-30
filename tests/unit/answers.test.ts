@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answerFields, chooseOption, type FieldType } from "@/lib/apply/answers";
+import { answerFields, chooseOption, degreeAliases, gpaOption, type FieldType } from "@/lib/apply/answers";
 import { applyProfileSchema } from "@/lib/apply/profile-schema";
 
 // A made-up F-1 student: authorized now (CPT/OPT), needs sponsorship later.
@@ -133,4 +133,90 @@ test("saved answers match the same question, not a similar one", () => {
   assert.equal(ask("How many years of experience do you have with Python?", "text", undefined).value, "3");
   assert.equal(ask("Years of Python experience", "text", undefined).value, "3");
   assert.notEqual(ask("How many years of experience do you have with SQL?", "text", undefined).value, "3");
+});
+
+// ---------------------------------------------------------------- Auto apply round (questions from real Greenhouse forms)
+
+test("GPA ranges, graduation windows and degree spellings", () => {
+  const ranges = ["3.5+", "3.0-3.49", "2.8-2.99", "2.5-2.79", "2.49 or Below", "No GPA"];
+  assert.equal(ask("What is your overall, total GPA?*", "combobox", ranges).value, "3.5+");
+  assert.equal(gpaOption(ranges, "3.43"), "3.0-3.49");
+  assert.equal(gpaOption(ranges, "2.3"), "2.49 or Below");
+  assert.equal(gpaOption(["Below 3.0", "3.0 - 3.49", "3.50 and above"], "3.5"), "3.50 and above");
+  assert.equal(gpaOption(ranges, ""), "No GPA");
+  assert.equal(ask("Is your graduation date between December 2027 and August 2028?*", "combobox").value, "Yes");
+  assert.equal(ask("Will you graduate before December 2027?").value, "No");
+  assert.deepEqual(degreeAliases("M.S.").slice(0, 3), ["M.S.", "Master of Science", "Master's Degree"]);
+  assert.equal(ask("Degree", "select", ["Bachelor's Degree", "Master's Degree", "PhD"]).value, "Master's Degree");
+});
+
+test("Greenhouse education rows use the row number, not the repeated label", () => {
+  const fields = [
+    { key: "s0", label: "School*", type: "combobox" as const, hint: "school--0" },
+    { key: "d0", label: "Degree*", type: "combobox" as const, hint: "degree--0" },
+    { key: "m0", label: "Discipline*", type: "combobox" as const, hint: "discipline--0" },
+    { key: "e0", label: "End date month*", type: "combobox" as const, hint: "end-month--0" },
+    { key: "y0", label: "End date year*", type: "number" as const, hint: "end-year--0" },
+    { key: "s1", label: "School*", type: "combobox" as const, hint: "school--1" },
+    { key: "y1", label: "End date year*", type: "number" as const, hint: "end-year--1" },
+  ];
+  const q = { ...p, previousSchool: "Grinnell College", previousDegree: "B.A. in Economics", previousGraduation: "2026-05" };
+  const a = Object.fromEntries(answerFields(fields, q).map((x) => [x.key, x]));
+  assert.equal(a.s0.value, "University of Chicago");
+  assert.equal(a.d0.value, "Master of Science");
+  assert.equal(a.m0.value, "Applied Data Science");
+  assert.deepEqual(a.m0.alts, ["Data Science"]);
+  assert.equal(a.e0.value, "May");
+  assert.equal(a.y0.value, "2028");
+  assert.equal(a.s1.value, "Grinnell College");
+  assert.equal(a.y1.value, "2026");
+});
+
+test("standard declarations: No when set, held for a check when not", () => {
+  const set: typeof p = { ...p, relatedToEmployee: "no", restrictiveAgreement: "no", clientRelationship: "no" };
+  const one = (label: string, prof: typeof p = set) => answerFields([{ key: "k", label, type: "combobox", options: YN }], prof, { company: "West Monroe", employers: ["Acme Analytics"] })[0];
+  assert.equal(one("Are you related to a West Monroe employee?*").value, "No");
+  assert.equal(one("Are you related to a West Monroe employee?*").confidence, "high");
+  assert.equal(one("Are you related to a West Monroe employee?*", p).confidence, "medium");
+  assert.equal(one("Have you ever been employed by or had any form of professional relationship with a client of West Monroe?*").rule, "client-relationship");
+  assert.equal(one("Have you previously worked at West Monroe?*").value, "No");
+  assert.equal(
+    answerFields([{ key: "k", label: "Have you previously worked at Acme?", type: "radio", options: YN }], set, { company: "Acme Analytics, Inc.", employers: ["Acme Analytics"] })[0].value,
+    "Yes",
+  );
+  assert.equal(one("Are you currently subject to a non-compete, non-solicitation, employment agreement or any other obligation with another employer that could affect your ability to perform the job?*").value, "No");
+  assert.equal(one("Are you currently in one of these sponsored statuses: O-1, TN, H1B1, H1B, E3? *").value, "No");
+  assert.equal(one("Are you currently in student (F-1) or Trainee (J1) status and/or have work authorization under CPT, OPT or STEM OPT?*").value, "Yes");
+});
+
+test("texts, opt-ins and consent", () => {
+  const sms = ask("We would like to contact you via SMS or WhatsApp. If you select no, we will contact you via the email address you provided.*", "combobox", YN);
+  assert.equal(sms.value, "No", "never the email address");
+  assert.equal(answerFields([{ key: "m", label: "Sign me up for job alerts about future opportunities", type: "checkbox" }], p)[0].value, false);
+  const certify = "I certify that the information I have provided in this application is true, complete, and accurate.*";
+  const off = ask(certify, "combobox", ["Yes"]);
+  assert.equal(off.value, null);
+  assert.equal(off.consent, true);
+  const on = answerFields([{ key: "c", label: certify, type: "combobox", options: ["Yes"] }], p, { consent: true })[0];
+  assert.equal(on.value, "Yes");
+  const policy = answerFields([{ key: "c", label: "Please review our current policy regarding use of generative AI.*", type: "combobox", options: ["Acknowledged"] }], p, { consent: true })[0];
+  assert.equal(policy.value, "Acknowledged");
+  const box = answerFields([{ key: "c", label: "By checking this box, I consent to Acme collecting my demographic data.*", type: "checkbox" }], p, { consent: true })[0];
+  assert.equal(box.value, true);
+});
+
+test("location, travel, race wording and lists", () => {
+  const near = answerFields(
+    [{ key: "n", label: "By your start date you must live within a 50-mile radius of the office. Will you meet this requirement?", type: "combobox", options: YN }],
+    { ...p, willingToRelocate: "" },
+    { jobLocation: "Chicago, IL" },
+  )[0];
+  assert.equal(near.value, "Yes");
+  assert.equal(ask("This role requires travel up to 50% of the time. Are you willing and able to meet this travel requirement?*", "combobox").value, "Yes");
+  assert.equal(ask("Which racial categories best describe you? Select all that apply.*", "combobox", ["Asian", "White", "I don't wish to answer"]).value, "I don't wish to answer");
+  assert.equal(ask("What is your legal first name?*", "text", undefined).value, "Alex");
+  const tools = answerFields([{ key: "t", label: "Which tools have you used in coursework?", type: "checkbox", options: ["Python", "R", "SQL", "Stata"] }], p, { skills: ["Python", "SQL", "Tableau"] })[0];
+  assert.deepEqual(tools.value, ["Python", "SQL"]);
+  const langs = answerFields([{ key: "l", label: "Language Fluency*", type: "combobox", multiple: true }], { ...p, languages: "English; Chinese (Mandarin)" })[0];
+  assert.deepEqual(langs.value, ["English", "Chinese (Mandarin)"]);
 });

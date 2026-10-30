@@ -29,6 +29,7 @@ export interface JobMatch {
   company: string;
   resumeId: string | null;
   description: string | null;
+  location: string | null;
 }
 
 /** Finds the tracked job (or found job) an application page belongs to. */
@@ -42,19 +43,57 @@ export async function findJobForUrl(url: string): Promise<JobMatch | null> {
   }
   const pattern = `%${host}%`;
   const tracked = await db
-    .select({ id: jobs.id, url: jobs.url, applyUrl: jobs.applyUrl, title: jobs.title, company: companies.name, resumeId: jobs.resumeId, description: jobs.description })
+    .select({ id: jobs.id, url: jobs.url, applyUrl: jobs.applyUrl, title: jobs.title, company: companies.name, resumeId: jobs.resumeId, description: jobs.description, location: jobs.location })
     .from(jobs)
     .innerJoin(companies, eq(jobs.companyId, companies.id))
     .where(or(and(isNotNull(jobs.url), like(jobs.url, pattern)), like(jobs.applyUrl, pattern)));
   const t = tracked.find((j) => (j.url && postingKey(j.url) === key) || (j.applyUrl && postingKey(j.applyUrl) === key));
-  if (t) return { jobId: t.id, foundId: null, title: t.title, company: t.company, resumeId: t.resumeId, description: t.description };
+  if (t) return { jobId: t.id, foundId: null, title: t.title, company: t.company, resumeId: t.resumeId, description: t.description, location: t.location };
 
   const found = await db
-    .select({ id: discoveredJobs.id, url: discoveredJobs.url, applyUrl: discoveredJobs.applyUrl, title: discoveredJobs.title, company: discoveredJobs.company, jobId: discoveredJobs.jobId, description: discoveredJobs.description })
+    .select({ id: discoveredJobs.id, url: discoveredJobs.url, applyUrl: discoveredJobs.applyUrl, title: discoveredJobs.title, company: discoveredJobs.company, jobId: discoveredJobs.jobId, description: discoveredJobs.description, location: discoveredJobs.location })
     .from(discoveredJobs)
     .where(or(like(discoveredJobs.url, pattern), like(discoveredJobs.applyUrl, pattern)));
   const f = found.find((j) => postingKey(j.url) === key || (j.applyUrl && postingKey(j.applyUrl) === key));
-  if (f) return { jobId: f.jobId, foundId: f.id, title: f.title, company: f.company, resumeId: null, description: f.description };
+  if (f) return { jobId: f.jobId, foundId: f.id, title: f.title, company: f.company, resumeId: null, description: f.description, location: f.location };
+
+  // Greenhouse's own form page (…/embed/job_app?for=acme&token=123) for a job shown on the company's site (?gh_jid=123).
+  const ghId = /greenhouse\.io$/.test(host) ? (new URL(url).searchParams.get("token") ?? /\/jobs\/(\d{5,})/.exec(url)?.[1]) : null;
+  if (ghId && /^\d{5,}$/.test(ghId)) {
+    const idRe = new RegExp(`(gh_jid=|token=|/jobs/)${ghId}(\\D|$)`);
+    const byId = `%${ghId}%`;
+    const t2 = await db
+      .select({ id: jobs.id, url: jobs.url, applyUrl: jobs.applyUrl, title: jobs.title, company: companies.name, resumeId: jobs.resumeId, description: jobs.description, location: jobs.location })
+      .from(jobs)
+      .innerJoin(companies, eq(jobs.companyId, companies.id))
+      .where(or(like(jobs.url, byId), like(jobs.applyUrl, byId)));
+    const tj = t2.find((j) => idRe.test(j.url ?? "") || idRe.test(j.applyUrl ?? ""));
+    if (tj) return { jobId: tj.id, foundId: null, title: tj.title, company: tj.company, resumeId: tj.resumeId, description: tj.description, location: tj.location };
+    const f2 = await db
+      .select({ id: discoveredJobs.id, url: discoveredJobs.url, applyUrl: discoveredJobs.applyUrl, title: discoveredJobs.title, company: discoveredJobs.company, jobId: discoveredJobs.jobId, description: discoveredJobs.description, location: discoveredJobs.location })
+      .from(discoveredJobs)
+      .where(or(like(discoveredJobs.url, byId), like(discoveredJobs.applyUrl, byId)));
+    const fj = f2.find((j) => idRe.test(j.url) || idRe.test(j.applyUrl ?? ""));
+    if (fj) return { jobId: fj.jobId, foundId: fj.id, title: fj.title, company: fj.company, resumeId: null, description: fj.description, location: fj.location };
+  }
+  return null;
+}
+
+/** The job behind an Auto apply task or an id the extension passes along. */
+export async function findJobById(ids: { jobId?: string | null; foundId?: string | null }): Promise<JobMatch | null> {
+  if (ids.jobId) {
+    const [t] = await db
+      .select({ id: jobs.id, title: jobs.title, company: companies.name, resumeId: jobs.resumeId, description: jobs.description, location: jobs.location })
+      .from(jobs)
+      .innerJoin(companies, eq(jobs.companyId, companies.id))
+      .where(eq(jobs.id, ids.jobId))
+      .limit(1);
+    if (t) return { jobId: t.id, foundId: null, title: t.title, company: t.company, resumeId: t.resumeId, description: t.description, location: t.location };
+  }
+  if (ids.foundId) {
+    const [f] = await db.select().from(discoveredJobs).where(eq(discoveredJobs.id, ids.foundId)).limit(1);
+    if (f) return { jobId: f.jobId, foundId: f.id, title: f.title, company: f.company, resumeId: null, description: f.description, location: f.location };
+  }
   return null;
 }
 

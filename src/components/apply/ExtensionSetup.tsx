@@ -8,6 +8,10 @@ const STEPS = [
     body: "Click “Load unpacked” and choose the extension folder inside Job Finder (Desktop › Job-Finder › extension).",
   },
   { title: "Pin it", body: "Click the puzzle-piece icon in Chrome's toolbar and pin “Job Finder Helper”." },
+  {
+    title: "After an update, reload it",
+    body: "On chrome://extensions, press the reload arrow on the Job Finder Helper card. Version 0.2.0 adds Auto apply and asks for more permissions (tabs, debugger).",
+  },
   { title: "Keep Job Finder running", body: "The helper sends everything to Job Finder on this Mac (http://localhost:3737)." },
 ];
 
@@ -52,6 +56,12 @@ export function ExtensionSetup() {
             answers from <i>My answers</i>, attaches your resume PDF and cover letter, and colors each field: green from your
             answers, yellow to check, red needs you. “Write answers with AI” drafts the open questions. You review and press
             Submit yourself, then “I submitted it” marks the job applied.
+          </p>
+          <p>
+            <b>Auto apply:</b> the helper checks Job Finder every half minute for applications you queued (Apply → Auto apply), opens
+            each one in a background tab, fills it the same way and submits it or leaves it for you, as you set it. While it fills
+            a form Chrome shows “Job Finder Helper started debugging this browser”: that&apos;s how it presses keys in dropdowns that
+            ignore scripts. The popup has an on/off switch.
           </p>
           <p className="text-muted-foreground">
             LinkedIn&apos;s terms don&apos;t allow automated collection, so the helper only reads pages you open, one job at a time,

@@ -123,7 +123,7 @@ async def main():
         ctx = await p.chromium.launch_persistent_context(f"{S}/chrome-profile-e2e4", headless=True, channel="chromium",
             args=[f"--disable-extensions-except={EXT}", f"--load-extension={EXT}"])
         sw = ctx.service_workers[0] if ctx.service_workers else await ctx.wait_for_event("serviceworker", timeout=20000)
-        await sw.evaluate("chrome.storage.local.set({ baseUrl: 'http://127.0.0.1:3740' })")
+        await sw.evaluate(f"chrome.storage.local.set({{ baseUrl: '{BASE}' }})")
 
         async def route_li(route):
             url = route.request.url

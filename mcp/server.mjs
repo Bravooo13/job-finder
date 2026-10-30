@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const BASE = (process.env.JOB_FINDER_URL || "http://127.0.0.1:3737").replace(/\/$/, "");
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 // ------------------------------------------------------------------ helpers
@@ -400,6 +400,57 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { url: str("The posting or application URL."), jobId: str("A My jobs id.") } },
     run: (a) => call("POST", "/api/apply/applied", a),
   },
+  {
+    name: "auto_apply",
+    description:
+      "Queues applications for Auto apply. The Job Finder Helper extension in the owner's Chrome opens each form in a background tab, fills it from My answers, attaches the resume, and submits it or holds it, following the owner's Auto apply settings (default: submit only when every answer came from My answers; anything guessed or AI-written waits for the owner's OK). One call per batch; then check progress with auto_apply_status. Jobs already applied to, already queued, or with only a LinkedIn/Handshake link are skipped with a reason.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        foundIds: strList("Found job ids (from search_found_jobs)."),
+        jobIds: strList("My jobs ids (from list_my_jobs or apply_queue)."),
+        urls: strList("Application page URLs."),
+      },
+    },
+    run: (a) => call("POST", "/api/apply/auto", { ...a, by: "agent" }),
+  },
+  {
+    name: "auto_apply_status",
+    description:
+      "Auto apply's applications with their status (queued, running, submitting, held = waiting for the owner's OK, needs_you, submitted, failed), a summary, what only the owner can do (needs), answers to check (checks), plus whether the browser helper is running and the settings. Use batchId from auto_apply to follow one batch.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        batchId: str("Only this batch."),
+        status: str("Comma-separated statuses, e.g. held,needs_you."),
+        limit: { type: "number", description: "Default 50." },
+      },
+    },
+    run: async (a) => {
+      const r = await call("GET", `/api/apply/auto${query({ batch: a.batchId, status: a.status, limit: a.limit ?? 50 })}`);
+      return {
+        counts: r.counts,
+        helper: r.helper,
+        ai: r.ai,
+        settings: r.settings,
+        applications: r.tasks.map((t) => ({ id: t.id, title: t.title, company: t.company, status: t.status, summary: t.summary, needs: t.needs, checks: t.checks, url: t.url, updatedAt: t.updatedAt })),
+      };
+    },
+  },
+  {
+    name: "auto_apply_action",
+    description:
+      "Acts on one Auto apply application: retry (try again), cancel (a queued one), remove (from the list), or submitted (the owner sent it himself; marks the job applied). Approving a held application is the owner's call: only use approve when the owner has said so in the conversation for that application.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: str("The application id (from auto_apply_status)."),
+        action: { type: "string", enum: ["approve", "retry", "cancel", "remove", "submitted"] },
+      },
+      required: ["id", "action"],
+    },
+    run: (a) => call("POST", `/api/apply/auto/${encodeURIComponent(a.id)}`, { action: a.action }),
+  },
 ];
 
 // --------------------------------------------------------------- protocol
@@ -419,7 +470,7 @@ async function handle(msg) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "job-finder", title: "Job Finder", version: VERSION },
         instructions:
-          "Job Finder is the owner's local job-search dashboard. Use these tools to find and triage jobs, send jobs you read in the browser, learn company boards, and fill application forms from the owner's saved answers. Read the repo's CLAUDE.md for the full procedure. Never submit an application or create an account for the owner; stop at the submit button and ask them.",
+          "Job Finder is the owner's local job-search dashboard. Use these tools to find and triage jobs, send jobs you read in the browser, learn company boards, and fill application forms from the owner's saved answers. To apply, prefer auto_apply: one call queues a batch and the owner's browser helper fills (and, per the owner's own settings, submits) each form, which costs far fewer steps than driving the browser yourself; follow it with auto_apply_status. Read the repo's CLAUDE.md for the full procedure. Never submit an application yourself, create an account, type a password or tick consent boxes for the owner; Auto apply does only what the owner switched on in its settings.",
       });
       return;
     }

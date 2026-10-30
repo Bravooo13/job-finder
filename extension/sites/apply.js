@@ -1,15 +1,52 @@
 // Application forms (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, or any
 // page you open the helper on): reads the questions, asks Job Finder for your
-// answers, fills them in and highlights what to check. It never submits; you
-// review and press Submit yourself.
+// answers, fills them in and highlights what to check.
+//
+// "Fill this application" never submits; you review and press Submit yourself.
+// Auto apply (started by Job Finder, see background.js) fills the form the same
+// way, then asks Job Finder whether to submit by your Auto apply settings.
 
 (() => {
   if (window.JF_APPLY) return;
   window.JF_APPLY = true;
-  const { sleep, clean, api, file, register } = window.JF;
+  const { sleep, clean, api, file, register, setStatus } = window.JF;
 
   const COLORS = { high: "#16a34a", medium: "#d97706", low: "#dc2626" };
-  let lastFill = null; // { fields, answers, elements }
+  let lastFill = null; // { fields, answers, elements, ids }
+  const aiKeys = new Set(); // fields the AI wrote or picked
+  let autoMode = false;
+
+  // ------------------------------------------------------------ real input
+  // Real key presses and clicks go through the background page (Chrome's
+  // debugger), for dropdowns that ignore events made by scripts.
+  let usedReal = false;
+  const real = (op) =>
+    new Promise((resolve) =>
+      chrome.runtime.sendMessage({ type: "jf:input", op }, (r) => resolve(chrome.runtime.lastError ? { ok: false } : r || { ok: false })),
+    );
+  async function realType(text) {
+    const r = await real({ kind: "text", text });
+    if (r.ok) usedReal = true;
+    return r.ok;
+  }
+  async function realKey(key, repeat = 1) {
+    const r = await real({ kind: key === "selectAll" ? "selectAll" : "key", key, repeat });
+    if (r.ok) usedReal = true;
+    return r.ok;
+  }
+  async function realClick(el) {
+    el.scrollIntoView({ block: "center" });
+    await sleep(80);
+    const b = el.getBoundingClientRect();
+    if (!b.width || !b.height) return false;
+    const r = await real({ kind: "click", x: b.left + b.width / 2, y: b.top + b.height / 2 });
+    if (r.ok) usedReal = true;
+    return r.ok;
+  }
+  function releaseInput() {
+    if (usedReal && !autoMode) chrome.runtime.sendMessage({ type: "jf:input-done" });
+    usedReal = false;
+  }
 
   // ------------------------------------------------------------ reading the form
   const visible = (el) => {
@@ -19,6 +56,9 @@
     const r = el.getBoundingClientRect();
     return r.width > 0 || r.height > 0;
   };
+  // Hidden helper inputs some dropdowns keep for the browser's "required" check.
+  const shadowInput = (el) =>
+    el.getAttribute("aria-hidden") === "true" || (el.tabIndex === -1 && getComputedStyle(el).opacity === "0") || /requiredInput/i.test(el.className || "");
 
   const textOf = (el) => clean(el?.innerText || el?.textContent || "");
 
@@ -106,6 +146,107 @@
     return out;
   }
 
+  // ---- dropdowns (React Select and other ARIA comboboxes)
+  const NO_OPTIONS = /^(no (options|results|matches)( found)?|loading|searching|type to search|start typing)/i;
+  // The dropdown's outer box (React Select: the parent of its "control"; not its inner input-container).
+  const comboBox = (el) => {
+    const control = el.closest('[class*="select__control"], [class*="-control"]');
+    if (control && control !== el && control.parentElement) return control.parentElement;
+    return el.closest('[class*="select__container"], [class*="select-container"], [class*="combobox" i], .select') || el.parentElement;
+  };
+  function listFor(el) {
+    const id = el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
+    const byId = id && document.getElementById(id);
+    if (byId) return byId;
+    return comboBox(el)?.querySelector('[role="listbox"], [class*="menu-list"], [class*="select__menu"]') || null;
+  }
+  function optionsOf(el) {
+    const list = listFor(el);
+    if (!list) return [];
+    const all = [...list.querySelectorAll('[role="option"], [class*="select__option"]')].filter(visible);
+    return all.filter((o) => !all.some((p) => p !== o && p.contains(o)) && !NO_OPTIONS.test(textOf(o)));
+  }
+  function selectedText(el) {
+    const box = comboBox(el);
+    const chips = box
+      ? [...box.querySelectorAll('[class*="single-value"], [class*="singleValue"], [class*="multi-value__label"], [class*="multiValue"] [class*="label"]')]
+          .map(textOf)
+          .filter(Boolean)
+      : [];
+    if (chips.length) return chips.join(" + ");
+    return el.getAttribute("aria-valuetext") || (el.value && !listFor(el) ? el.value : "");
+  }
+  const isMulti = (el) => Boolean(comboBox(el)?.querySelector('[class*="is-multi"], [class*="--multi"]')) || el.getAttribute("aria-multiselectable") === "true";
+
+  async function openCombo(el) {
+    el.scrollIntoView({ block: "center" });
+    el.focus();
+    await sleep(60);
+    if (listFor(el)) return true;
+    // React Select opens on a mouse press on its control; most others on the down arrow.
+    const control = el.closest('[class*="control"]') || el;
+    control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    await sleep(180);
+    if (listFor(el)) return true;
+    if (await realKey("ArrowDown")) {
+      await sleep(300);
+      if (listFor(el)) return true;
+    }
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", keyCode: 40, bubbles: true }));
+    await sleep(250);
+    return Boolean(listFor(el));
+  }
+  async function closeCombo(el) {
+    if (!listFor(el)) return;
+    if (!(await realKey("Escape"))) el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+    await sleep(100);
+  }
+  async function typeInCombo(el, text) {
+    el.scrollIntoView({ block: "center" });
+    el.focus();
+    await sleep(60);
+    if (el.value) await realKey("selectAll");
+    if (await realType(text)) return true;
+    setValue(el, text);
+    return false;
+  }
+  async function clearTyped(el) {
+    if (!el.value) return;
+    if (await realKey("selectAll")) await realKey("Backspace");
+    else setValue(el, "");
+    await sleep(100);
+  }
+  async function pickOption(el, opt) {
+    opt.scrollIntoView({ block: "nearest" });
+    const before = selectedText(el);
+    // React Select picks on click; others on a mouse press or Enter.
+    opt.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    opt.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+    opt.click();
+    await sleep(250);
+    if (selectedText(el) && selectedText(el) !== before) return true;
+    if (opt.isConnected && visible(opt) && (await realClick(opt))) {
+      await sleep(250);
+      return Boolean(selectedText(el)) && selectedText(el) !== before;
+    }
+    return Boolean(selectedText(el)) && selectedText(el) !== before;
+  }
+
+  /** Reads the choices of dropdowns that only show them when opened, so the answer can be one of them. */
+  async function readComboOptions(fields, elements) {
+    for (const f of fields) {
+      if (f.type !== "combobox" || f.options?.length) continue;
+      // Type-to-search lists (cities, schools) show nothing until you type.
+      if (/\b(location|city|school|university|college|institution|employer|company)\b/i.test(f.label)) continue;
+      const el = elements.get(f.key)?.el;
+      if (!el || !(await openCombo(el))) continue;
+      await sleep(150);
+      const texts = optionsOf(el).map(textOf).filter(Boolean);
+      if (texts.length) f.options = texts.slice(0, 300);
+      await closeCombo(el);
+    }
+  }
+
   function scan() {
     const fields = [];
     const elements = new Map();
@@ -117,7 +258,7 @@
       if (el.closest("#job-finder-helper")) continue;
       const type = fieldType(el);
       if (!type) continue;
-      if (type !== "file" && !visible(el) && !(type === "radio" || type === "checkbox")) continue;
+      if (type !== "file" && (!visible(el) || shadowInput(el)) && !(type === "radio" || type === "checkbox")) continue;
       if ((type === "radio" || type === "checkbox") && el.name) {
         const key = `${type}:${el.name}`;
         if (!groups.has(key)) groups.set(key, []);
@@ -126,15 +267,18 @@
       }
       if (el.disabled || el.readOnly) continue;
       const key = `jf-${n++}`;
+      const label = labelFor(el);
       const options = type === "select" ? [...el.options].map((o) => clean(o.textContent)).filter(Boolean) : undefined;
       fields.push({
         key,
-        label: labelFor(el),
+        label,
         type,
         options,
-        required: el.required || el.getAttribute("aria-required") === "true" || /\*\s*$/.test(labelFor(el)),
+        required: el.required || el.getAttribute("aria-required") === "true" || /\*\s*$/.test(label),
         placeholder: el.getAttribute("placeholder") || undefined,
         maxLength: el.maxLength > 0 ? el.maxLength : undefined,
+        hint: el.id || el.name || undefined,
+        multiple: type === "combobox" ? isMulti(el) || /select all that apply/i.test(label) || undefined : el.multiple || undefined,
       });
       elements.set(key, { kind: "single", el });
     }
@@ -142,16 +286,20 @@
       const type = gkey.split(":")[0];
       const key = `jf-${n++}`;
       if (type === "checkbox" && inputs.length === 1) {
-        fields.push({ key, label: labelFor(inputs[0]) || optionText(inputs[0]), type: "checkbox", required: inputs[0].required });
+        const label = labelFor(inputs[0]) || optionText(inputs[0]);
+        fields.push({ key, label, type: "checkbox", required: inputs[0].required || /\*\s*$/.test(label), hint: inputs[0].id || inputs[0].name || undefined });
         elements.set(key, { kind: "single", el: inputs[0] });
         continue;
       }
+      const label = groupLabel(inputs);
       fields.push({
         key,
-        label: groupLabel(inputs),
+        label,
         type: type === "radio" ? "radio" : "checkbox",
         options: inputs.map(optionText),
-        required: inputs.some((i) => i.required),
+        required: inputs.some((i) => i.required) || /\*\s*$/.test(label),
+        hint: inputs[0].name || undefined,
+        multiple: type === "checkbox" || undefined,
       });
       elements.set(key, { kind: "group", inputs });
     }
@@ -163,7 +311,7 @@
         const lines = textOf(p).split("\n").filter((l) => !g.texts.includes(l.trim()));
         label = lines[0] || "";
       }
-      fields.push({ key, label, type: "radio", options: g.texts });
+      fields.push({ key, label, type: "radio", options: g.texts, required: /\*\s*$/.test(label) });
       elements.set(key, { kind: "buttons", buttons: g.buttons, texts: g.texts });
     }
     return { fields: fields.filter((f) => f.label || f.type === "file"), elements };
@@ -183,37 +331,76 @@
   const norm = (s) => clean(s).toLowerCase();
   function bestMatch(texts, wanted) {
     const w = norm(String(wanted));
+    if (!w) return -1;
     let i = texts.findIndex((t) => norm(t) === w);
-    if (i < 0) i = texts.findIndex((t) => norm(t).startsWith(w) || w.startsWith(norm(t)));
+    if (i < 0) i = texts.findIndex((t) => norm(t).startsWith(w) || (norm(t).length > 2 && w.startsWith(norm(t))));
     if (i < 0) i = texts.findIndex((t) => norm(t).includes(w));
     if (i < 0 && /^decline$/i.test(w)) i = texts.findIndex((t) => /decline|prefer not|don.?t wish|not to (say|answer|disclose)|do not want/i.test(t));
     return i;
   }
 
-  async function fillCombobox(el, value) {
-    el.focus();
-    el.click();
-    el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    setValue(el, String(value));
-    await sleep(500);
-    const listId = el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
-    const list = (listId && document.getElementById(listId)) || document.querySelector("[role='listbox']");
-    const options = list ? [...list.querySelectorAll("[role='option'], .select__option, li")].filter(visible) : [];
-    const i = bestMatch(options.map(textOf), value);
-    if (i >= 0) {
-      options[i].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      options[i].click();
-      await sleep(200);
-      return true;
+  async function fillCombobox(el, value, alts = []) {
+    const values = (Array.isArray(value) ? value : [value]).map(String).filter(Boolean);
+    const picked = [];
+    for (const v of values) {
+      if (norm(selectedText(el)).split(" + ").includes(norm(v))) {
+        picked.push(v);
+        continue;
+      }
+      const tries = [v, ...(values.length === 1 ? alts : [])];
+      let done = false;
+      for (const t of tries) {
+        await openCombo(el);
+        let options = optionsOf(el);
+        let i = bestMatch(options.map(textOf), t);
+        if (i < 0) {
+          await typeInCombo(el, t);
+          for (let w = 0; w < 8; w++) {
+            await sleep(400);
+            options = optionsOf(el);
+            if (options.length && !/loading/i.test(textOf(listFor(el)))) break;
+          }
+          i = bestMatch(options.map(textOf), t);
+          // A search with suggestions for what you typed (a school, a city): the first one that contains it.
+          if (i < 0) i = options.findIndex((o) => norm(textOf(o)).includes(norm(t).split(",")[0]));
+        }
+        if (i >= 0) {
+          const text = textOf(options[i]);
+          if (await pickOption(el, options[i])) {
+            picked.push(text);
+            done = true;
+            break;
+          }
+        }
+        await clearTyped(el);
+      }
+      if (!done && values.length === 1) break;
     }
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    return false;
+    await closeCombo(el);
+    el.blur?.();
+    return picked;
   }
 
+  const fileBox = (input) => input.closest('[class*="upload" i], [class*="file" i], .field, fieldset') || input.parentElement;
+  const attachedName = (input) => (/[\w\-. ()]+\.(pdf|docx?|txt|rtf)\b/i.exec(textOf(fileBox(input))) || [])[0] || "";
+
   async function uploadFile(input, kind) {
-    const path = kind === "cover_letter" ? `/api/apply/cover-letter?url=${encodeURIComponent(location.href)}` : `/api/apply/resume?url=${encodeURIComponent(location.href)}`;
+    const ids = lastFill?.ids || {};
+    const q = new URLSearchParams({ url: location.href, ...(ids.jobId ? { jobId: ids.jobId } : {}), ...(ids.foundId ? { foundId: ids.foundId } : {}) });
+    const path = kind === "cover_letter" ? `/api/apply/cover-letter?${q}` : `/api/apply/resume?${q}`;
     const res = await file(path);
     if (!res.ok) return { ok: false, note: res.error || "No file" };
+    // A file is already attached (the site's own autofill): swap it for yours.
+    const existing = attachedName(input);
+    if (existing && existing !== res.name) {
+      const remove = fileBox(input)?.querySelector('button[aria-label*="remove" i], button[title*="remove" i], [class*="remove" i] button, button[class*="remove" i]');
+      if (remove) {
+        const id = input.id;
+        remove.click();
+        await sleep(700);
+        input = (id && document.getElementById(id)) || fileBox(input)?.querySelector("input[type=file]") || input;
+      }
+    } else if (existing === res.name) return { ok: true, note: `Attached ${res.name}`, input };
     const bytes = Uint8Array.from(atob(res.base64), (c) => c.charCodeAt(0));
     const f = new File([bytes], res.name, { type: res.mime });
     const dt = new DataTransfer();
@@ -221,7 +408,8 @@
     input.files = dt.files;
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
-    return { ok: true, note: `Attached ${res.name}` };
+    await sleep(400);
+    return { ok: true, note: `Attached ${res.name}`, input };
   }
 
   function mark(target, confidence, note) {
@@ -235,36 +423,38 @@
 
   async function applyAnswer(entry, answer) {
     if (!entry) return false;
-    const { value, confidence, note, file: fileKind } = answer;
+    const { value, confidence, note, file: fileKind, alts } = answer;
     if (entry.kind === "single") {
       const el = entry.el;
       const type = fieldType(el);
       if (type === "file") {
         if (!fileKind) {
-          mark(el.closest("div") || el, "low", note);
+          mark(fileBox(el), "low", note);
           return false;
         }
         const r = await uploadFile(el, fileKind);
-        mark(el.closest("div") || el, r.ok ? "high" : "low", r.note);
+        if (r.input && r.input !== el) entry.el = r.input;
+        mark(fileBox(entry.el), r.ok ? "high" : "low", r.note);
         return r.ok;
       }
       if (value === null || value === undefined) {
-        mark(el, "low", note || "Not answered");
+        mark(type === "combobox" ? comboBox(el) : el, "low", note || "Not answered");
         return false;
       }
       if (type === "checkbox") {
         if (Boolean(value) !== el.checked) el.click();
       } else if (type === "select") {
         const texts = [...el.options].map((o) => clean(o.textContent));
-        const i = bestMatch(texts, value);
+        const i = bestMatch(texts, Array.isArray(value) ? value[0] : value);
         if (i < 0) {
           mark(el, "low", `No option “${value}”`);
           return false;
         }
         setValue(el, el.options[i].value);
       } else if (type === "combobox") {
-        const ok = await fillCombobox(el, value);
-        mark(el.closest("div") || el, ok ? confidence : "low", ok ? note : `Pick “${value}”`);
+        const picked = await fillCombobox(el, value, alts || []);
+        const ok = picked.length > 0;
+        mark(comboBox(el), ok ? confidence : "low", ok ? note : `Pick “${Array.isArray(value) ? value.join(", ") : value}”`);
         return ok;
       } else {
         setValue(el, String(value));
@@ -278,18 +468,20 @@
         return false;
       }
       const texts = entry.inputs.map(optionText);
-      const i = bestMatch(texts, value);
-      if (i < 0) {
-        mark(entry.inputs[0].closest("fieldset, div"), "low", `No option “${value}”`);
-        return false;
+      const wanted = Array.isArray(value) ? value : [value];
+      let any = false;
+      for (const w of wanted) {
+        const i = bestMatch(texts, w);
+        if (i < 0) continue;
+        if (!entry.inputs[i].checked) entry.inputs[i].click();
+        any = true;
       }
-      if (!entry.inputs[i].checked) entry.inputs[i].click();
-      mark(entry.inputs[i].closest("fieldset, div") || entry.inputs[i], confidence, note);
-      return true;
+      mark(entry.inputs[0].closest("fieldset, div") || entry.inputs[0], any ? confidence : "low", any ? note : `No option “${wanted.join(", ")}”`);
+      return any;
     }
     if (entry.kind === "buttons") {
       if (value === null || value === undefined) return false;
-      const i = bestMatch(entry.texts, value);
+      const i = bestMatch(entry.texts, Array.isArray(value) ? value[0] : value);
       if (i < 0) return false;
       entry.buttons[i].click();
       mark(entry.buttons[i].parentElement, confidence, note);
@@ -298,20 +490,25 @@
     return false;
   }
 
-  async function fill(_options, progress) {
+  async function fill(options = {}, progress) {
     progress("Reading the form…");
+    aiKeys.clear();
     const { fields, elements } = scan();
     if (!fields.length) throw new Error("No form fields found on this page. Open the application form first.");
-    const res = await api("POST", "/api/apply/fill", { url: location.href, pageTitle: document.title, fields });
+    progress("Reading the dropdown choices…");
+    await readComboOptions(fields, elements);
+    const ids = { jobId: options.jobId || undefined, foundId: options.foundId || undefined };
+    const res = await api("POST", "/api/apply/fill", { url: location.href, pageTitle: document.title, fields, auto: Boolean(options.auto), ...ids });
     if (!res.ok) throw new Error(res.data?.error || "Job Finder couldn't answer");
     const { answers, job } = res.data;
+    lastFill = { fields, answers, elements, ids: { jobId: ids.jobId || job?.jobId, foundId: ids.foundId || job?.foundId } };
     let filled = 0;
     for (const a of answers) {
       progress(`Filling ${filled + 1} of ${answers.length}…`);
       if (await applyAnswer(elements.get(a.key), a)) filled++;
       await sleep(60);
     }
-    lastFill = { fields, answers, elements };
+    releaseInput();
     const check = answers.filter((a) => a.value !== null && a.confidence !== "high").length;
     const todo = answers.filter((a) => a.value === null && !a.file && (fields.find((f) => f.key === a.key)?.required || a.needsWriting)).length;
     const writing = answers.filter((a) => a.needsWriting).length;
@@ -320,7 +517,7 @@
         `Filled ${filled} of ${fields.length} fields${job ? ` for ${job.title} at ${job.company}` : ""}.\n` +
         `Green = from your answers. Yellow = check it (${check}). Red = needs you (${todo}).` +
         (writing ? `\n${writing} written answer${writing > 1 ? "s" : ""} left: press “Write answers with AI” or type them.` : "") +
-        "\nReview everything, then press Submit yourself.",
+        (options.auto ? "" : "\nReview everything, then press Submit yourself."),
       filled,
       total: fields.length,
       check,
@@ -330,9 +527,13 @@
     };
   }
 
-  async function write(_options, progress) {
+  async function write(options = {}, progress) {
     if (!lastFill) await fill({}, progress);
-    const pending = lastFill.answers.filter((a) => a.needsWriting);
+    const pending = lastFill.answers.filter((a) => {
+      if (!a.needsWriting) return false;
+      const f = lastFill.fields.find((x) => x.key === a.key);
+      return !options.onlyRequired || f?.required;
+    });
     if (!pending.length) return { message: "No open questions to write." };
     let done = 0;
     for (const a of pending) {
@@ -340,13 +541,168 @@
       const entry = lastFill.elements.get(a.key);
       if (!field || entry?.kind !== "single") continue;
       progress(`Writing answer ${done + 1} of ${pending.length}: “${field.label.slice(0, 60)}”…`);
-      const res = await api("POST", "/api/apply/answer", { question: field.label, maxLength: field.maxLength, url: location.href });
+      const res = await api("POST", "/api/apply/answer", { question: field.label, maxLength: field.maxLength, url: location.href, ...lastFill.ids });
       if (!res.ok) throw new Error(res.data?.error || "The AI couldn't write this one");
       setValue(entry.el, res.data.answer);
       mark(entry.el, "medium", "Written by AI: read and edit before submitting");
+      aiKeys.add(a.key);
       done++;
     }
     return { message: `Wrote ${done} answer${done === 1 ? "" : "s"}. Read and edit them before you submit.` };
+  }
+
+  /** Required choice questions the answer engine didn't know: the AI picks from your resume (always held for your OK). */
+  async function aiPick(progress) {
+    if (!lastFill) return 0;
+    const todo = lastFill.answers
+      .filter((a) => a.value === null && !a.file && !a.consent && !a.needsWriting && a.rule === "unknown")
+      .map((a) => lastFill.fields.find((f) => f.key === a.key))
+      .filter((f) => f && f.required && f.type !== "file" && f.type !== "textarea" && !isFilled(lastFill.elements.get(f.key)));
+    if (!todo.length) return 0;
+    progress(`Asking the AI about ${todo.length} question${todo.length === 1 ? "" : "s"}…`);
+    const res = await api("POST", "/api/apply/pick", {
+      url: location.href,
+      ...lastFill.ids,
+      fields: todo.map(({ key, label, type, options, multiple, maxLength }) => ({ key, label, type, options, multiple, maxLength })),
+    });
+    if (!res.ok) return 0;
+    let n = 0;
+    for (const a of res.data.answers || []) {
+      if (await applyAnswer(lastFill.elements.get(a.key), { value: a.value, confidence: "medium", note: "Picked by the AI from your resume: check it" })) {
+        aiKeys.add(a.key);
+        n++;
+      }
+    }
+    releaseInput();
+    return n;
+  }
+
+  function isFilled(entry) {
+    if (!entry) return false;
+    if (entry.kind === "single") {
+      const el = entry.el;
+      const t = fieldType(el);
+      if (t === "file") return (el.files?.length ?? 0) > 0 || Boolean(attachedName(el));
+      if (t === "checkbox") return el.checked;
+      if (t === "combobox") return Boolean(selectedText(el));
+      if (t === "select") return Boolean(el.value) && !/^(select|choose|please select|--)/i.test(el.options[el.selectedIndex]?.text || "");
+      return Boolean((el.value || "").trim());
+    }
+    if (entry.kind === "group") return entry.inputs.some((i) => i.checked);
+    if (entry.kind === "buttons") return entry.buttons.some((b) => b.getAttribute("aria-pressed") === "true" || /\b(selected|active|checked|is-selected)\b/i.test(b.className));
+    return false;
+  }
+
+  function shownValue(entry) {
+    if (!entry) return "";
+    if (entry.kind === "single") {
+      const el = entry.el;
+      const t = fieldType(el);
+      if (t === "file") return el.files?.[0]?.name || attachedName(el);
+      if (t === "checkbox") return el.checked ? "Ticked" : "";
+      if (t === "combobox") return selectedText(el);
+      if (t === "select") return clean(el.options[el.selectedIndex]?.text || "");
+      return (el.value || "").slice(0, 300);
+    }
+    if (entry.kind === "group") return entry.inputs.filter((i) => i.checked).map(optionText).join(", ");
+    if (entry.kind === "buttons") return entry.buttons.filter((b) => b.getAttribute("aria-pressed") === "true").map(textOf).join(", ");
+    return "";
+  }
+
+  /** What's on the page now, field by field, for the submit decision and your review. */
+  function fieldStates() {
+    const out = [];
+    for (const f of lastFill.fields) {
+      const a = lastFill.answers.find((x) => x.key === f.key) || {};
+      const entry = lastFill.elements.get(f.key);
+      const filled = isFilled(entry);
+      const ai = aiKeys.has(f.key);
+      // Filled by the page itself (a default, the site's autofill) on a question Job Finder didn't know: check it.
+      const confidence = ai ? "medium" : a.value === null || a.value === undefined ? (filled && /^(unknown|open-question)$/.test(a.rule || "") ? "medium" : "high") : a.confidence;
+      out.push({ label: f.label || f.hint || "Field", type: f.type, required: Boolean(f.required), filled, value: shownValue(entry), confidence, rule: a.rule, ai, consent: Boolean(a.consent) });
+    }
+    return out;
+  }
+
+  function findSubmit() {
+    const cands = [...document.querySelectorAll("button, input[type=submit], [role=button]")].filter((b) => visible(b) && !b.closest("#job-finder-helper") && !b.disabled);
+    const text = (b) => clean(b.value || textOf(b));
+    return (
+      cands.find((b) => /^(submit( my)?( application)?|apply( now)?|send( my)? application|submit and apply|finish|complete application)$/i.test(text(b))) ||
+      cands.find((b) => (b.type === "submit" || b.getAttribute("type") === "submit") && /submit|apply|send/i.test(text(b)))
+    );
+  }
+
+  // ------------------------------------------------------------ Auto apply
+  async function runAuto(o) {
+    autoMode = true;
+    const send = (result) => chrome.runtime.sendMessage({ type: "jf:auto-result", result: { taskId: o.taskId, ...result } });
+    const progress = (message) => setStatus({ state: "busy", action: "auto", message: `Auto apply: ${message}` });
+    try {
+      progress("waiting for the form…");
+      let fields = [];
+      for (let i = 0; i < 20; i++) {
+        ({ fields } = scan());
+        if (fields.filter((f) => f.type !== "file").length >= 2) break;
+        await sleep(750);
+      }
+      if (fields.filter((f) => f.type !== "file").length < 2) {
+        const frame = [...document.querySelectorAll("iframe[src]")].find((f) => /greenhouse\.io\/embed\/job_app|jobs\.(eu\.)?lever\.co|jobs\.ashbyhq\.com|smartrecruiters\.com/i.test(f.src));
+        if (frame) return send({ redirect: frame.src });
+        const link = [...document.querySelectorAll("a[href]")].find((a) => /^(apply( for this (job|position|role))?( now)?|application)$/i.test(textOf(a)) && /^https?:/.test(a.href) && a.href !== location.href);
+        if (link) return send({ redirect: link.href });
+        return send({ action: "needs_you", summary: "Couldn't find an application form on this page.", needs: ["Find the application form"] });
+      }
+      if (/myworkday(jobs|site)\.com$/.test(location.hostname)) {
+        return send({
+          action: "needs_you",
+          summary: "Workday needs you to sign in, and its form has several pages. Sign in, then use “Fill this application” on each page.",
+          needs: ["Sign in to Workday"],
+        });
+      }
+      if ([...document.querySelectorAll("input[type=password]")].some(visible)) {
+        return send({ action: "needs_you", summary: "This site wants you to sign in or create an account first.", needs: ["Sign in on this site"] });
+      }
+
+      await fill({ auto: true, jobId: o.jobId, foundId: o.foundId }, progress);
+      const notes = [];
+      if (o.ai?.ready && o.settings?.essays !== "none") {
+        try {
+          await write({ onlyRequired: o.settings?.essays !== "all" }, progress);
+        } catch (e) {
+          notes.push(`Written answers: ${e.message}`);
+        }
+      }
+      if (o.ai?.ready && o.settings?.aiPick !== false) await aiPick(progress);
+      releaseInput();
+
+      const states = fieldStates();
+      const blockers = [];
+      if ([...document.querySelectorAll('iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="hcaptcha.com"]')].some((f) => visible(f) && f.getBoundingClientRect().height > 40)) {
+        blockers.push("Tick the “I'm not a robot” box");
+      }
+      const answers = states.map((s) => ({ label: s.label.slice(0, 500), value: s.value || "", confidence: s.confidence, rule: s.rule, required: s.required }));
+      progress("checking it against your settings…");
+      const res = await api("POST", `/api/apply/auto/${o.taskId}/check`, { fields: states, blockers });
+      if (!res.ok) throw new Error(res.data?.error || "Job Finder couldn't check the form");
+      const d = res.data;
+      const summary = notes.length ? `${d.summary} ${notes.join(" ")}` : d.summary;
+      if (d.action === "submit") {
+        const btn = findSubmit();
+        if (!btn) return send({ action: "hold", summary: "Everything is filled, but I couldn't find the Submit button. Press it yourself.", answers, checks: d.checks });
+        btn.setAttribute("data-jf-submit", "1");
+        btn.scrollIntoView({ block: "center" });
+        await sleep(400);
+        const r = btn.getBoundingClientRect();
+        setStatus({ state: "done", action: "auto", message: "Auto apply: submitting…" });
+        return send({ action: "submit", submit: { x: r.left + r.width / 2, y: r.top + r.height / 2 }, summary, answers, checks: d.checks });
+      }
+      setStatus({ state: "done", action: "auto", message: `Auto apply: ${summary}` });
+      return send({ action: d.action, summary, needs: d.needs, checks: d.checks, answers });
+    } catch (e) {
+      setStatus({ state: "error", action: "auto", message: `Auto apply stopped: ${e.message || e}` });
+      return send({ action: "failed", error: e.message || String(e) });
+    }
   }
 
   async function applied() {
@@ -377,7 +733,20 @@
   register({
     name: "apply",
     hello: "On an application page. Fill it from your saved answers, then review and submit yourself.",
-    actions: { fill, write, applied, savePosting, scan: async () => ({ message: "Scanned.", ...scan(), elements: undefined }) },
+    actions: {
+      fill,
+      write,
+      applied,
+      savePosting,
+      scan: async () => ({ message: "Scanned.", ...scan(), elements: undefined }),
+      // Started by Auto apply; it reports back to the background page by itself.
+      auto: async (options) => {
+        if (window.JF_AUTO_RUNNING === options.taskId) return { message: "Already running.", started: true };
+        window.JF_AUTO_RUNNING = options.taskId;
+        runAuto(options);
+        return { message: "Auto apply started.", started: true };
+      },
+    },
     panelActions: [
       { id: "fill", label: "Fill this application", primary: true },
       { id: "write", label: "Write answers with AI" },

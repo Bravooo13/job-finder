@@ -4,8 +4,9 @@ A personal job search dashboard. Import your resume, let saved searches scan
 thousands of company job boards for roles that fit it, grab jobs from LinkedIn
 and Handshake with a Chrome extension, filter by industry and visa
 friendliness (sponsorship, OPT/CPT, H-1B history), compare jobs side by side,
-tailor LaTeX resumes and cover letters with AI agents, fill application forms
-from your saved answers, and track every application from saved to offer.
+tailor LaTeX resumes and cover letters with AI agents, fill (and, if you let
+it, submit) application forms from your saved answers, and track every
+application from saved to offer.
 
 AI agents can drive it too, through a JSON API and an MCP server: see
 [CLAUDE.md](./CLAUDE.md).
@@ -58,6 +59,15 @@ answers (contact, education, work authorization, availability, EEO choices,
 your own Q&A). On an application form the browser helper fills every field it
 can, attaches your resume and cover letter, drafts open questions with AI and
 colors what needs a look. You review and press Submit yourself.
+
+**Auto apply**: tick jobs in *To apply* or *Found jobs* and press Auto apply.
+The browser helper opens each application in a background tab of your Chrome,
+fills it from your answers and your resume, and then, as you choose, submits it
+when every answer came from your answers (holding anything guessed or written
+by AI for your OK), always waits for your OK, or only fills it. Consent and "I
+certify" boxes are ticked only if you turn that on. It never creates accounts,
+types passwords or solves CAPTCHAs: those applications wait for you, with a
+list of exactly what's missing. AI agents can queue a batch with one tool call.
 
 **Map**: a drawn US map with states shaded by how many jobs they have and a
 bubble per city; click a state or a city to list its jobs. A street map is one

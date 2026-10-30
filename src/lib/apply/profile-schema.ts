@@ -28,9 +28,12 @@ export const applyProfileSchema = z.object({
   degree: text(200), // "Master of Science"
   major: text(200),
   gpa: text(20),
+  schoolStart: text(20), // YYYY-MM
   graduation: text(20), // YYYY-MM
   previousSchool: text(200),
   previousDegree: text(200),
+  previousMajor: text(200),
+  previousStart: text(20),
   previousGraduation: text(20),
 
   // Work authorization
@@ -64,8 +67,14 @@ export const applyProfileSchema = z.object({
   veteran: text(200),
   disability: text(200),
 
-  languages: text(300),
+  languages: text(300), // "English; Chinese (Mandarin)"
   workedHereBefore: yesNo,
+
+  // Standard declarations. Not set = the form is held for you to check.
+  relatedToEmployee: yesNo, // "Are you related to anyone who works here?"
+  restrictiveAgreement: yesNo, // non-compete, non-solicitation, post-employment covenants
+  clientRelationship: yesNo, // "Have you worked for or with one of our clients?"
+  textMessages: yesNo, // agree to text/WhatsApp updates (not set = no)
 
   // Your own questions and answers, matched by wording.
   custom: z

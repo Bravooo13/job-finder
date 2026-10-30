@@ -51,9 +51,22 @@ function button(label, onClick, secondary = false) {
   $("actions").appendChild(b);
 }
 
+async function showAuto() {
+  const s = await bg({ type: "jf:auto-state" });
+  $("autoOn").checked = s?.enabled !== false;
+  $("autoState").textContent = !s
+    ? ""
+    : s.current
+      ? `Working on ${s.current.title} at ${s.current.company}…`
+      : s.enabled
+        ? "On: runs the applications you queue on Job Finder's Apply page."
+        : "Paused. Queued applications wait until you turn it on.";
+}
+
 async function init() {
   const { baseUrl } = await chrome.storage.local.get("baseUrl");
   $("base").value = baseUrl || "";
+  showAuto();
 
   const status = await bg({ type: "jf:api", method: "GET", path: "/api/ext/status" });
   if (status?.ok && status.data?.app === "job-finder") {
@@ -81,7 +94,7 @@ async function init() {
     return;
   }
   if (info?.site === "apply") {
-    $("where").textContent = `Application page (${host}). Fill it, check it, submit it yourself.`;
+    $("where").textContent = `Application page (${host}). Fill it, check it, submit it yourself (or queue it for Auto apply in Job Finder).`;
     button("Fill this application", () => runAction(tab, "fill"));
     button("Write answers with AI", () => runAction(tab, "write"), true);
     button("Save this job", () => runAction(tab, "savePosting"), true);
@@ -100,6 +113,11 @@ for (const a of document.querySelectorAll("[data-open]")) {
     chrome.runtime.sendMessage({ type: "jf:open", path: a.dataset.open });
   });
 }
+$("autoOn").addEventListener("change", async () => {
+  await chrome.storage.local.set({ autoApply: $("autoOn").checked });
+  if ($("autoOn").checked) chrome.runtime.sendMessage({ type: "jf:auto-kick" });
+  showAuto();
+});
 $("saveBase").addEventListener("click", async () => {
   const value = $("base").value.trim().replace(/\/+$/, "");
   await chrome.storage.local.set({ baseUrl: value || "" });

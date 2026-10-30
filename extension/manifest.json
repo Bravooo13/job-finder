@@ -1,26 +1,79 @@
 {
   "manifest_version": 3,
   "name": "Job Finder Helper",
-  "version": "0.1.0",
-  "description": "Send jobs from LinkedIn, Handshake and any careers page to your Job Finder, and fill job applications from your saved answers.",
-  "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["http://localhost:3737/*", "http://127.0.0.1:3737/*", "https://www.linkedin.com/*"],
-  "background": { "service_worker": "background.js" },
+  "version": "0.2.0",
+  "description": "Send jobs from LinkedIn, Handshake and any careers page to your Job Finder, fill job applications from your saved answers, and run Auto apply.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "alarms",
+    "debugger"
+  ],
+  "host_permissions": [
+    "http://localhost:3737/*",
+    "http://127.0.0.1:3737/*",
+    "https://www.linkedin.com/*",
+    "https://boards.greenhouse.io/*",
+    "https://job-boards.greenhouse.io/*",
+    "https://boards.eu.greenhouse.io/*",
+    "https://job-boards.eu.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://jobs.eu.lever.co/*",
+    "https://jobs.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.myworkdaysite.com/*",
+    "https://jobs.smartrecruiters.com/*",
+    "https://apply.workable.com/*",
+    "https://jobs.jobvite.com/*",
+    "https://*.bamboohr.com/*",
+    "https://*.recruitee.com/*",
+    "https://*.breezy.hr/*",
+    "https://*.applytojob.com/*",
+    "https://ats.rippling.com/*",
+    "https://*.teamtailor.com/*",
+    "https://*.pinpointhq.com/*",
+    "https://jobs.gem.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Job Finder",
-    "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" }
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
   },
-  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/*"],
-      "js": ["common.js", "sites/linkedin.js"],
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": [
+        "common.js",
+        "sites/linkedin.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://*.joinhandshake.com/*"],
-      "js": ["common.js", "sites/handshake.js"],
+      "matches": [
+        "https://*.joinhandshake.com/*"
+      ],
+      "js": [
+        "common.js",
+        "sites/handshake.js"
+      ],
       "run_at": "document_idle"
     },
     {
@@ -34,10 +87,33 @@
         "https://jobs.ashbyhq.com/*",
         "https://*.myworkdayjobs.com/*",
         "https://*.myworkdaysite.com/*",
-        "https://jobs.smartrecruiters.com/*"
+        "https://jobs.smartrecruiters.com/*",
+        "https://apply.workable.com/*",
+        "https://jobs.jobvite.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.recruitee.com/*",
+        "https://*.breezy.hr/*",
+        "https://*.applytojob.com/*",
+        "https://ats.rippling.com/*",
+        "https://*.teamtailor.com/*",
+        "https://*.pinpointhq.com/*",
+        "https://jobs.gem.com/*"
       ],
-      "js": ["common.js", "sites/apply.js"],
+      "js": [
+        "common.js",
+        "sites/apply.js"
+      ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:3737/*",
+        "http://127.0.0.1:3737/*"
+      ],
+      "js": [
+        "sites/app.js"
+      ],
+      "run_at": "document_start"
     }
   ]
 }

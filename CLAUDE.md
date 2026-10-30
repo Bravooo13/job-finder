@@ -9,7 +9,7 @@ how he likes to work) is in **`USER.md`** next to this file. It is local only
 (gitignored) because this repo is public. Read it if it exists, and never
 commit personal data: no names, emails, resumes, job lists or database files.
 
-## Status (updated 2026-10-29)
+## Status (updated 2026-10-30)
 
 Shipped in the 2026-10-29 round (list under "Changelog" at the end): job
 classification and Found-jobs filters (industry, role, visa/OPT/CPT/H-1B,
@@ -17,6 +17,13 @@ level, state…), new sources (SmartRecruiters, Simplify lists, board learning,
 careers-page grabbing), the Chrome extension (LinkedIn/Handshake grabbing,
 application filling), the Apply page and answer engine, the Compare page, a
 drawn US map, H-1B employer data, an agent JSON API and an MCP server.
+
+2026-10-30: **Auto apply** (Apply → Auto apply, `auto_apply` MCP tool). The
+extension takes queued applications from Job Finder, fills each form in a
+background tab and submits it or holds it by the owner's settings, so applying
+no longer needs an agent driving the browser. Tested end to end on a mock
+Greenhouse form built with real React Select (`tests/e2e/auto_apply_e2e.py`),
+not yet on live sites.
 
 **Needs the owner** (an agent can't do these):
 1. Restart Job Finder once (Ctrl+C in its Terminal window, then double-click
@@ -32,14 +39,18 @@ drawn US map, H-1B employer data, an agent JSON API and an MCP server.
    features (written answers, the compare agent, the page-grabbing fallback).
 5. Optional: Settings → H-1B employer history → Download (or upload the CSV
    from the USCIS Data Hub; USCIS may refuse the download).
+6. For Auto apply: reload the extension (version 0.2.0 asks for tabs, alarms
+   and debugger permissions), choose the settings on Apply → Auto apply
+   (consent boxes are off until he turns them on), and fill My answers →
+   Standard declarations and the street address/ZIP if forms ask for them.
 
 **Next up** (rough priority):
 - Run the grabbers on the owner's real LinkedIn/Handshake searches and tune the
   extractors (both sites change their markup often).
-- Try "Fill this application" on real Greenhouse/Lever/Ashby/Workday forms and
-  extend `extension/sites/apply.js` where fields are missed (Workday's
-  multi-step flow is the weakest).
-- Agent skills `job-grabber` and `job-applier` (the procedures below).
+- Run Auto apply on real Greenhouse/Lever/Ashby forms and extend
+  `extension/sites/apply.js` and the answer rules where fields are missed.
+  Workday (sign-in, several pages) is reported as "needs you" for now.
+- Agent skill `job-grabber` (`job-applier` is in `.claude/skills/`).
 - Small-company discovery at scale: a list of target companies → careers pages
   → `grab_page` each (board learning makes later runs automatic).
 - Interview tracking, apply-by reminders, job-alert email import.
@@ -205,13 +216,34 @@ the API).
   fills them, attaches the resume and cover letter PDFs, and outlines each
   field green (from saved answers), yellow (check it) or red (needs you).
   "Write answers with AI" drafts open questions. "I submitted it" marks the job
-  applied. **It never clicks Submit.**
+  applied. **"Fill this application" never clicks Submit.** Dropdowns: it opens
+  each one to read its choices before asking for answers, and types into
+  React Select and other search dropdowns with real key presses (through
+  `chrome.debugger`, see below).
+- `sites/app.js` (Job Finder's own pages): marks the page with
+  `data-job-finder-helper` and lets the Apply page start Auto apply at once.
+
+**Auto apply** (`background.js` + the `auto` action in `sites/apply.js`).
+Every 30 s (an alarm) the worker asks `POST /api/apply/auto/next` for a queued
+application, opens it in a background tab and attaches `chrome.debugger`
+(focus emulation, so dropdowns open in a background tab, and real key presses;
+Chrome shows "started debugging this browser" meanwhile). The content script
+fills the form (`/api/apply/fill` with `auto: true`), writes required open
+questions with the application model, lets the AI pick unknown required
+choices (`/api/apply/pick`), reports every field to
+`POST /api/apply/auto/:id/check` and gets back submit / hold / needs_you
+(`src/lib/apply/decide.ts`). To submit, the worker clicks the button with a
+real click and watches for a thank-you page, validation errors or a CAPTCHA,
+then reports with `PATCH /api/apply/auto/:id`. Pages without a form follow an
+embedded Greenhouse/Lever/Ashby iframe or an "Apply" link; Workday and sign-in
+pages come back as "needs you". Held and needs-you forms stay open in their tab
+(setting). The popup has an on/off switch (`autoApply` in storage).
 - `sites/generic.js` (any page, from the popup): "Grab jobs from this page".
 
 **Agent hook.** On a page with the helper, an agent can run an action with
 `window.postMessage({ jobFinder: "grab", options: { pages: 2 } }, "*")`
 (LinkedIn/Handshake: `grab`, `grabThis`; forms: `fill`, `write`, `applied`,
-`savePosting`, `scan`) and read progress from
+`savePosting`, `scan`; `auto` is for the worker) and read progress from
 `document.documentElement.dataset.jobFinderStatus` (JSON with `state`
 idle/busy/done/error, `message`, `result`).
 
@@ -240,9 +272,17 @@ without an Origin (curl, the MCP server) and from the extension are allowed.
 | `GET /api/companies?q=`, `POST /api/companies` | Find / add a company board |
 | `GET/POST /api/searches`, `POST /api/searches/:id/run` | Searches; start a run |
 | `GET/PUT /api/apply/profile` | My answers |
-| `POST /api/apply/fill` | `{ url, pageTitle?, fields: [{key, label, type, options?, required?, maxLength?}] }` → an answer per field with confidence and reason |
-| `POST /api/apply/answer` | `{ question, maxLength?, url/jobId/foundId }` → AI-written answer (remembered) |
-| `GET /api/apply/resume?url=/jobId=/resumeId=` | Resume PDF for the job |
+| `POST /api/apply/fill` | `{ url, pageTitle?, fields: [{key, label, type, options?, required?, maxLength?, hint?, multiple?}], jobId?, foundId?, auto? }` → an answer per field with confidence and reason (`hint` = the element id, e.g. Greenhouse's `school--0`) |
+| `POST /api/apply/answer` | `{ question, maxLength?, url/jobId/foundId }` → AI-written answer (remembered), with the application model |
+| `POST /api/apply/pick` | `{ url/jobId/foundId, fields }` → the AI's answers to choice/short questions from the resume (never legal, visa, EEO or consent questions) |
+| `GET /api/apply/resume?url=/jobId=/foundId=/resumeId=` | Resume PDF for the job: a tailored one, else the uploaded PDF (setting), else the master LaTeX resume |
+| `GET/POST/DELETE /api/apply/resume-file` | The resume PDF uploaded for applications (`?download=1` for the file) |
+| `GET /api/apply/auto?status=&batch=&limit=` | Auto apply's applications, counts, settings, AI and whether the browser helper checked in |
+| `POST /api/apply/auto` | `{ jobIds?, foundIds?, urls?, by? }` → queued and skipped (with reasons) |
+| `GET/PATCH/POST/DELETE /api/apply/auto/:id` | One application; the helper's report; `{ action: approve/retry/cancel/remove/submitted }` |
+| `POST /api/apply/auto/:id/check` | `{ fields, blockers? }` → submit / hold / needs_you by the settings |
+| `POST /api/apply/auto/next` | For the helper: claim the next queued application |
+| `GET/PUT /api/apply/auto/settings` | submit (sure/review/fill/always), consent, essays, aiPick, resume, pauseSeconds, keepTabs, enabled |
 | `GET /api/apply/cover-letter?url=/jobId=/id=` | Latest cover letter as PDF |
 | `POST /api/apply/applied` | `{ url }` or `{ jobId }` (saves a found job first) |
 | `GET /api/apply/queue` | Saved jobs not applied yet, with readiness |
@@ -265,14 +305,17 @@ Tools: `job_finder_status`, `search_found_jobs`, `get_found_job`,
 `add_company_board`, `grab_linkedin`, `list_searches`, `run_search`, `apply_queue`,
 `get_apply_profile`, `answer_application_fields`, `write_application_answer`,
 `get_resume_pdf` / `get_cover_letter_pdf` (saved to a temp file; the path is
-for a browser tool's file upload), `mark_applied`. See `mcp/README.md`.
+for a browser tool's file upload), `mark_applied`, `auto_apply`,
+`auto_apply_status`, `auto_apply_action`. See `mcp/README.md`.
 
 ## Operating procedures (for an AI agent working for the owner)
 
 Ground rules:
 - **Never submit an application, create an account, accept terms or type a
-  password** for the owner. Fill, check, then stop at the submit button and
-  ask. After he says he submitted, call `mark_applied`.
+  password** for the owner yourself. Fill, check, then stop at the submit
+  button and ask. After he says he submitted, call `mark_applied`. Auto apply
+  is the exception the owner set up: it submits in his Chrome only as his
+  Auto apply settings allow, and consent boxes only if he turned that on.
 - Work in the owner's own Chrome (Claude in Chrome), where he is signed in to
   LinkedIn and Handshake. Open new tabs; leave his tabs alone.
 - Pace: LinkedIn's terms forbid automated collection, so read only pages he
@@ -319,7 +362,14 @@ industry version", or the Resume tailor agent), write a cover letter (Cover
 letters page; the owner's `cover-letter-writer` skill has his voice rules), and
 check readiness with `apply_queue`.
 
-**Apply.** Open the application (`applyUrl`). With the extension: run `fill`,
+**Apply (preferred: Auto apply).** Follow `.claude/skills/job-applier/SKILL.md`:
+check `auto_apply_status` (is the helper running, what are the settings),
+queue the jobs with `auto_apply`, check back every few minutes, and report
+submitted / held (show the checks; approve only with the owner's yes) /
+needs you (show exactly what). This costs a few tool calls per batch instead of
+dozens of browser steps per form.
+
+**Apply by hand (when asked).** Open the application (`applyUrl`). With the extension: run `fill`,
 then `write` for open questions, read every yellow and red field, fix what you
 can from My answers, and hand over to the owner to review and submit. Without
 the extension: collect every field's label, type and options, call
@@ -342,7 +392,10 @@ field. For an F-1 student on CPT/OPT the usual honest answers are:
 | US citizen / green card / U.S. person (ITAR/EAR)? | usCitizen / permanentResident / usPerson | No |
 | Visa status? | visaStatus | the option closest to "F-1" |
 | EEO (gender, race, veteran, disability) | blank means decline | "I don't wish to answer" |
-| Certify / consent checkboxes | never filled | the owner ticks them |
+| Certify / consent / "please review our policy" | Auto apply setting `consent` (off by default) | the owner ticks them, unless he turned it on |
+| Text-message / WhatsApp updates, job alerts, marketing | textMessages (not set = no) | No |
+| Related to an employee, non-compete, worked with a client | Standard declarations (not set = "No", held to check) | No |
+| GPA ranges ("3.0-3.49"), "graduating between X and Y" | gpa, graduation | the range holding the GPA; computed yes/no |
 
 Always use the owner's actual My answers; the table only explains the wording.
 
@@ -374,7 +427,11 @@ Always use the owner's actual My answers; the table only explains the wording.
 
 ### Checking your work
 
-`npm test && npm run typecheck && npm run lint && npm run build`, then open
+`npm test && npm run typecheck && npm run lint && npm run build`. For the
+extension and Auto apply, run the two e2e tests against a scratch database
+(see the top of `tests/e2e/extension_e2e.py` and `tests/e2e/auto_apply_e2e.py`;
+the second needs `tests/e2e/fixtures/build.sh` and serves the mock form over
+local HTTPS, because tabs the extension opens skip Playwright's routing). Then open
 /found, /apply, /compare, /map, /settings and a job page at desktop and phone
 widths and look for console errors. Extension scripts should pass
 `node --check`. For the MCP server, list its tools with an MCP client and call
@@ -392,6 +449,23 @@ widths and look for console errors. Extension scripts should pass
   links point at an ATS.
 
 ## Changelog
+
+**2026-10-30**
+- Auto apply: a queue of applications (`apply_tasks`, migration 0005), the
+  extension's worker (background tab, real key presses for React Select,
+  submit with outcome checks), four submit modes, a consent switch, written
+  answers and unknown choices by the cheapest Claude model (Settings → Model for
+  application answers), an uploaded resume PDF, Apply → Auto apply page, Auto
+  apply buttons in To apply and Found jobs, MCP tools, the `job-applier` skill.
+- Answer engine: Greenhouse education rows, GPA ranges, graduation windows,
+  degree spellings (M.S. = Master's Degree), legal-name wording, sponsored
+  statuses (H-1B/O-1/TN/E-3), F-1/J-1 status, near-the-office and travel
+  questions, related to an employee, client relationships, non-competes,
+  text-message and marketing opt-ins, consent and policy acknowledgments,
+  languages and tools lists, "racial categories". Standard declarations in
+  My answers.
+- Greenhouse jobs shown on company sites (`?gh_jid=`) apply through
+  Greenhouse's own form page (`/embed/job_app?for=…&token=…`).
 
 **2026-10-29**
 - Every found job classified: industry (21), role type (14), level, state,

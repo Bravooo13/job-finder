@@ -1,12 +1,13 @@
 "use client";
 
-import { BadgeCheck, Bookmark, ChevronDown, Columns3, ExternalLink, FileSignature, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { BadgeCheck, Bookmark, Bot, ChevronDown, Columns3, ExternalLink, FileSignature, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { describeQueue, queueAutoApply } from "@/lib/apply/auto-client";
 import { PROVIDER_LABELS, type Source } from "@/lib/boards/types";
 import { industryLabel } from "@/lib/classify/industry";
 import { roleTypeLabel } from "@/lib/classify/role";
@@ -210,10 +211,14 @@ export function FoundList({ jobs, total }: { jobs: FoundRow[]; total: number }) 
   const [pending, startTransition] = useTransition();
   const allSelected = jobs.length > 0 && jobs.every((j) => selected.has(j.id));
 
-  function bulk(kind: "save" | "dismiss") {
+  function bulk(kind: "save" | "dismiss" | "auto") {
     const ids = Array.from(selected);
     startTransition(async () => {
-      if (kind === "dismiss") {
+      if (kind === "auto") {
+        const r = await queueAutoApply({ foundIds: ids });
+        if (!r.ok) return void toast.error(r.error);
+        toast.success(describeQueue(r.data), { action: { label: "Watch", onClick: () => router.push("/apply?tab=auto") }, duration: 8000 });
+      } else if (kind === "dismiss") {
         await setFoundStatus(ids, "dismissed");
         toast.success(`Dismissed ${ids.length} jobs`);
       } else {
@@ -239,9 +244,12 @@ export function FoundList({ jobs, total }: { jobs: FoundRow[]; total: number }) 
           Showing {jobs.length.toLocaleString()} of {total.toLocaleString()}
         </label>
         {selected.size ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => bulk("save")} disabled={pending}>
               <Bookmark /> Save {selected.size}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => bulk("auto")} disabled={pending} title="Fill and send the applications from your answers (Apply → Auto apply)">
+              <Bot /> Auto apply {selected.size}
             </Button>
             <Button size="sm" variant="outline" onClick={() => bulk("dismiss")} disabled={pending}>
               <X /> Dismiss {selected.size}

@@ -1,8 +1,9 @@
 # Job Finder MCP server
 
 Lets an AI agent use Job Finder through tools: search and triage found jobs,
-send jobs it read in the browser, learn company job boards, run searches, and
-answer application forms from your saved answers. It talks to Job Finder on
+send jobs it read in the browser, learn company job boards, run searches,
+answer application forms from your saved answers, and queue applications for
+Auto apply. It talks to Job Finder on
 this computer (http://127.0.0.1:3737), so keep the app running.
 
 No install step: it's one file with no dependencies (Node 20+).
@@ -49,5 +50,10 @@ somewhere else.
 | `write_application_answer` | Drafts an open question's answer in your voice |
 | `get_resume_pdf`, `get_cover_letter_pdf` | Saves the PDF to a temp file and returns its path, for uploading |
 | `mark_applied` | Marks a job applied after you submit |
+| `auto_apply` | Queue a batch for Auto apply (found job ids, My jobs ids or application URLs) |
+| `auto_apply_status` | Each application's status, what only you can do, answers to check, and whether the browser helper is running |
+| `auto_apply_action` | Retry, cancel, remove, or mark one submitted (approve only when you said so) |
 
-The server never submits applications. See ../CLAUDE.md for the procedures.
+The MCP server itself never submits anything. Auto apply runs in your Chrome
+through the extension and submits only as your Auto apply settings allow
+(Apply → Auto apply). See ../CLAUDE.md for the procedures.

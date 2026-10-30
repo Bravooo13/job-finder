@@ -1,7 +1,7 @@
 import "server-only";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { resumeEntries, resumes, settings } from "@/lib/db/schema";
+import { resumeEntries, resumeSkillGroups, resumes, settings } from "@/lib/db/schema";
 import { applyProfileSchema, type ApplyProfile } from "./profile-schema";
 
 const KEY = "apply.profile";
@@ -41,9 +41,12 @@ async function defaultsFromResume(): Promise<Partial<ApplyProfile>> {
     degree: degreeOf(current?.title),
     major: majorOf(current?.title),
     gpa,
+    schoolStart: current?.startDate ?? "",
     graduation: current?.endDate ?? "",
     previousSchool: previous?.organization ?? "",
     previousDegree: previous?.title ?? "",
+    previousMajor: majorOf(previous?.title),
+    previousStart: previous?.startDate ?? "",
     previousGraduation: previous?.endDate ?? "",
     over18: "yes",
     hearAbout: "LinkedIn",
@@ -61,6 +64,23 @@ export async function getApplyProfile(): Promise<ApplyProfile> {
     if (k === "custom") merged[k] = v;
   }
   return applyProfileSchema.parse(merged);
+}
+
+/** Facts from your master resume the answer engine uses: your skills and the places you've worked. */
+export async function resumeFacts(): Promise<{ skills: string[]; employers: string[] }> {
+  const master =
+    (await db.query.resumes.findFirst({ where: eq(resumes.isMaster, true) })) ??
+    (await db.query.resumes.findFirst());
+  if (!master) return { skills: [], employers: [] };
+  const [groups, entries] = await Promise.all([
+    db.select({ skills: resumeSkillGroups.skills }).from(resumeSkillGroups).where(eq(resumeSkillGroups.resumeId, master.id)),
+    db.select({ section: resumeEntries.section, organization: resumeEntries.organization }).from(resumeEntries).where(eq(resumeEntries.resumeId, master.id)),
+  ]);
+  const skills = [...new Set(groups.flatMap((g) => g.skills ?? []).map((s) => s.trim()).filter(Boolean))];
+  const employers = [
+    ...new Set(entries.filter((e) => e.section === "experience" || e.section === "volunteer").map((e) => (e.organization ?? "").trim()).filter(Boolean)),
+  ];
+  return { skills, employers };
 }
 
 /** What you saved yourself (without the resume defaults). */

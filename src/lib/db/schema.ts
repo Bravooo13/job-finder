@@ -307,6 +307,49 @@ export const grabRuns = sqliteTable("grab_runs", {
   createdAt: createdAt(),
 });
 
+// --------------------------------------------------------------- auto apply
+
+/** One field of an application as Auto apply filled it, for your review. */
+export interface ApplyTaskAnswer {
+  label: string;
+  value: string;
+  confidence: "high" | "medium" | "low";
+  rule?: string;
+  required?: boolean;
+}
+
+// One application for Auto apply: the browser helper opens the form, fills it
+// from My answers, and submits it or holds it for you.
+export const applyTasks = sqliteTable(
+  "apply_tasks",
+  {
+    id: id(),
+    batchId: text("batch_id").notNull(),
+    jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    foundId: text("found_id").references(() => discoveredJobs.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    company: text("company").notNull(),
+    url: text("url").notNull(), // the application form
+    status: text("status")
+      .$type<"queued" | "running" | "submitting" | "held" | "needs_you" | "submitted" | "failed" | "canceled">()
+      .notNull()
+      .default("queued"),
+    // You looked at a held application and said submit it.
+    approved: integer("approved", { mode: "boolean" }).notNull().default(false),
+    summary: text("summary"),
+    needs: text("needs", { mode: "json" }).$type<string[]>().notNull(), // what only you can do
+    checks: text("checks", { mode: "json" }).$type<string[]>().notNull(), // answers to look at before it's sent
+    answers: text("answers", { mode: "json" }).$type<ApplyTaskAnswer[]>().notNull(),
+    by: text("by").notNull().default("you"), // you | agent
+    attempts: integer("attempts").notNull().default(0),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("apply_tasks_status_idx").on(t.status, t.createdAt), index("apply_tasks_batch_idx").on(t.batchId), index("apply_tasks_job_idx").on(t.jobId)],
+);
+
 // ---------------------------------------------------------- AI and letters
 
 // App settings as JSON values (AI provider, agent prompts, notes about you).

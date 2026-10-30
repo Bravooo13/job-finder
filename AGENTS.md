@@ -9,6 +9,8 @@ Personal context about the owner is in `USER.md` (local only, not in git).
 
 Hard rules, repeated here:
 - Never submit an application, create an account, accept terms or type a
-  password for the owner. Stop at Submit and ask.
+  password for the owner yourself. Stop at Submit and ask. To apply in bulk,
+  queue the jobs for Auto apply (`auto_apply`), which submits only as the
+  owner's own settings allow; see `.claude/skills/job-applier/SKILL.md`.
 - Never commit personal data (USER.md, data/, resumes, .env).
 - Read LinkedIn and Handshake at a human pace, only pages the owner would open.

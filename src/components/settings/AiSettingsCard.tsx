@@ -258,6 +258,25 @@ export function AiSettingsCard({ initial }: { initial: AiStatus }) {
                 <p className="text-xs text-muted-foreground">{CLAUDE_MODELS.find((m) => m.id === s.claudeModel)?.note}</p>
               )}
             </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="apply-model">Model for application answers</Label>
+              <Select value={s.applyModel || "claude-haiku-5-5"} onValueChange={(v) => set("applyModel", v)}>
+                <SelectTrigger id="apply-model" className="sm:w-96">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLAUDE_MODELS.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Used by Auto apply and “Write answers with AI”. The cheapest model keeps each application to a few short calls.
+              </p>
+            </div>
           </div>
         ) : (
           <div className="grid gap-5">

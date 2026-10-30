@@ -5,6 +5,8 @@ export type AiProvider = "claude" | "ollama";
 export interface AiSettings {
   provider: AiProvider;
   claudeModel: string;
+  /** Claude model for application answers and Auto apply (the cheapest one by default). */
+  applyModel: string;
   ollamaUrl: string;
   ollamaModel: string;
 }
@@ -12,9 +14,15 @@ export interface AiSettings {
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   provider: "claude",
   claudeModel: "claude-sonnet-5-5",
+  applyModel: "claude-haiku-5-5",
   ollamaUrl: "http://127.0.0.1:11434",
   ollamaModel: "",
 };
+
+/** The settings to use for application answers: the same provider, with the application model for Claude. */
+export function forApplying(s: AiSettings): AiSettings {
+  return s.provider === "claude" ? { ...s, claudeModel: s.applyModel || s.claudeModel } : s;
+}
 
 export const CLAUDE_MODELS = [
   {

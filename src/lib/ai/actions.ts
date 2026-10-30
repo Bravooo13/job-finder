@@ -22,6 +22,7 @@ import { getThreadMessages, listThreads, type ThreadScope } from "./threads";
 const settingsSchema = z.object({
   provider: z.enum(["claude", "ollama"]),
   claudeModel: z.string().trim().min(1).max(100),
+  applyModel: z.string().trim().min(1).max(100).optional(),
   ollamaUrl: z.string().trim().url("Enter a URL like http://127.0.0.1:11434").max(300),
   ollamaModel: z.string().trim().max(200),
 });

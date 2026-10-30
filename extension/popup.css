@@ -23,3 +23,4 @@ details button { margin-top: 8px; width: 100%; }
   .pill { background: #1e293b; color: #cbd5e1; } .result { background: #1e293b; border-color: #334155; }
   input, select { background: #1e293b; color: #e2e8f0; border-color: #475569; } button.secondary { background: #1e1b4b; color: #c7d2fe; }
 }
+.auto { border-top: 1px solid var(--border, #e2e8f0); padding-top: 8px; margin-top: 8px; }

@@ -13,6 +13,13 @@ Connects Chrome to Job Finder on this computer.
   green from your answers, yellow to check, red needs you. "Write answers with
   AI" drafts open questions. You review and press Submit yourself; then "I
   submitted it" marks the job applied.
+- **Auto apply**: every half minute the helper asks Job Finder for an
+  application you queued (Apply → Auto apply). It opens the form in a
+  background tab, fills it the same way, and submits it or leaves it for you,
+  following your Auto apply settings. While it works, Chrome shows "Job Finder
+  Helper started debugging this browser": the helper uses Chrome's debugger to
+  press keys in dropdowns that ignore scripts and to let dropdowns open in a
+  background tab. Turn it off with the switch in the toolbar popup.
 
 ## Install
 
@@ -22,6 +29,8 @@ Connects Chrome to Job Finder on this computer.
 4. Pin "Job Finder Helper" from the puzzle-piece menu.
 
 After pulling a new version, press the reload icon on the extension's card.
+Version 0.2.0 (Auto apply) asks for three more permissions: tabs, alarms and
+debugger.
 
 ## How it works
 
@@ -31,6 +40,7 @@ in `sites/` handles one kind of page. Agents can trigger the same actions with
 `window.postMessage({ jobFinder: "grab", options }, "*")` and read progress
 from `<html data-job-finder-status>`; see ../CLAUDE.md.
 
-The helper only talks to Job Finder (localhost:3737) and the page you're on.
+The helper only talks to Job Finder (localhost:3737), the page you're on, and
+the application tabs Auto apply opens.
 LinkedIn's terms don't allow automated collection, so it reads only pages you
 open, one job at a time. Use it for your own job search.
