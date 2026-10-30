@@ -120,8 +120,8 @@ export function AutoApply({ initial }: { initial: AutoState }) {
     const data = await res.json();
     if (!res.ok) return void toast.error(data.error ?? "Upload failed");
     toast.success(`Auto apply will attach ${data.file.name}`);
-    setState((s) => ({ ...s, resumeFile: data.file, settings: { ...s.settings, resume: "file" } }));
-    if (state.settings.resume !== "file") saveSettings({ resume: "file" });
+    setState((s) => ({ ...s, resumeFile: data.file }));
+    if (state.settings.resume === "generated") saveSettings({ resume: "match" });
   }
 
   const s = state.settings;
@@ -166,11 +166,13 @@ export function AutoApply({ initial }: { initial: AutoState }) {
           </p>
           <p className="flex items-center gap-2">
             {state.resumeFile || s.resume === "generated" ? <CheckCircle2 className="size-4 text-emerald-600" /> : <TriangleAlert className="size-4 text-amber-600" />}
-            {s.resume === "file"
-              ? state.resumeFile
-                ? `Resume: ${state.resumeFile.name} (unless you tailored one for the job).`
-                : "No resume PDF uploaded: Job Finder builds one from your LaTeX resume instead."
-              : "Resume: built from your LaTeX resume (tailored for the job when there is one)."}
+            {s.resume === "match"
+              ? `Resume: the one tailored for the job, else your version for its field (Profile & resumes), else ${state.resumeFile ? state.resumeFile.name : "your master resume"}.`
+              : s.resume === "file"
+                ? state.resumeFile
+                  ? `Resume: ${state.resumeFile.name} (unless you tailored one for the job).`
+                  : "No resume PDF uploaded: Job Finder builds one from your LaTeX resume instead."
+                : "Resume: built from your LaTeX resumes (tailored for the job, else your version for its field)."}
           </p>
         </CardContent>
       </Card>
@@ -358,6 +360,31 @@ export function AutoApply({ initial }: { initial: AutoState }) {
             </Select>
           </div>
 
+          <div className="grid gap-2 sm:grid-cols-2 sm:items-center">
+            <div>
+              <Label htmlFor="auto-letters" className="text-sm font-medium">
+                Cover letters
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                When the job has none, the Cover letter writer writes one from your resume and the job description, saves it on the{" "}
+                <Link href="/cover-letters" className="text-primary hover:underline">
+                  Cover letters
+                </Link>{" "}
+                page and attaches it. It waits for your OK before it&apos;s sent, when “Submit when sure” is on.
+              </p>
+            </div>
+            <Select value={s.coverLetters} onValueChange={(v) => saveSettings({ coverLetters: v as AutoApplySettings["coverLetters"] })}>
+              <SelectTrigger id="auto-letters">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="required">Write one when the form requires it</SelectItem>
+                <SelectItem value="always">Write one whenever the form has a place for it</SelectItem>
+                <SelectItem value="never">Never (attach only letters I wrote)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Toggle
             id="auto-pick"
             label="Let the AI answer questions Job Finder doesn't know"
@@ -368,22 +395,30 @@ export function AutoApply({ initial }: { initial: AutoState }) {
 
           <div className="grid gap-2">
             <p className="text-sm font-medium">Resume to attach</p>
-            <RadioGroup value={s.resume} onValueChange={(v) => saveSettings({ resume: v as AutoApplySettings["resume"] })} className="grid gap-2 sm:grid-cols-2">
-              <label htmlFor="resume-file" className={cn("flex cursor-pointer items-start gap-3 rounded-lg border p-3", s.resume === "file" && "border-primary bg-primary/5")}>
-                <RadioGroupItem value="file" id="resume-file" className="mt-0.5" />
-                <span className="text-sm">
-                  <span className="block font-medium">A PDF I upload</span>
-                  <span className="block text-xs text-muted-foreground">{state.resumeFile ? state.resumeFile.name : "None yet"}</span>
-                </span>
-              </label>
-              <label htmlFor="resume-generated" className={cn("flex cursor-pointer items-start gap-3 rounded-lg border p-3", s.resume === "generated" && "border-primary bg-primary/5")}>
-                <RadioGroupItem value="generated" id="resume-generated" className="mt-0.5" />
-                <span className="text-sm">
-                  <span className="block font-medium">Built from my LaTeX resume</span>
-                  <span className="block text-xs text-muted-foreground">Profile &amp; resumes</span>
-                </span>
-              </label>
+            <RadioGroup value={s.resume} onValueChange={(v) => saveSettings({ resume: v as AutoApplySettings["resume"] })} className="grid gap-2 sm:grid-cols-3">
+              {(
+                [
+                  ["match", "The version for the job's field", `Data engineering job → your Data engineering version. None fits → ${state.resumeFile ? state.resumeFile.name : "your master resume"}.`],
+                  ["file", "Always my uploaded PDF", state.resumeFile ? state.resumeFile.name : "None uploaded yet"],
+                  ["generated", "Always my LaTeX resumes", "Your field's version, else your master resume (Profile & resumes)"],
+                ] as const
+              ).map(([value, label, hint]) => (
+                <label key={value} htmlFor={`resume-${value}`} className={cn("flex cursor-pointer items-start gap-3 rounded-lg border p-3", s.resume === value && "border-primary bg-primary/5")}>
+                  <RadioGroupItem value={value} id={`resume-${value}`} className="mt-0.5" />
+                  <span className="text-sm">
+                    <span className="block font-medium">{label}</span>
+                    <span className="block text-xs text-muted-foreground">{hint}</span>
+                  </span>
+                </label>
+              ))}
             </RadioGroup>
+            <p className="text-xs text-muted-foreground">
+              A resume you tailored for one job always goes with that job. Make versions for a field in{" "}
+              <Link href="/profile" className="text-primary hover:underline">
+                Profile &amp; resumes
+              </Link>{" "}
+              (“New industry version”).
+            </p>
             <div className="flex flex-wrap items-center gap-2">
               <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
               <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy === "resume"}>

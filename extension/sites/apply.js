@@ -389,7 +389,8 @@
     const q = new URLSearchParams({ url: location.href, ...(ids.jobId ? { jobId: ids.jobId } : {}), ...(ids.foundId ? { foundId: ids.foundId } : {}) });
     const path = kind === "cover_letter" ? `/api/apply/cover-letter?${q}` : `/api/apply/resume?${q}`;
     const res = await file(path);
-    if (!res.ok) return { ok: false, note: res.error || "No file" };
+    if (!res.ok) return { ok: false, note: res.error || "No file", missing: res.status === 404 };
+    const why = res.why ? ` (${res.why})` : "";
     // A file is already attached (the site's own autofill): swap it for yours.
     const existing = attachedName(input);
     if (existing && existing !== res.name) {
@@ -400,7 +401,7 @@
         await sleep(700);
         input = (id && document.getElementById(id)) || fileBox(input)?.querySelector("input[type=file]") || input;
       }
-    } else if (existing === res.name) return { ok: true, note: `Attached ${res.name}`, input };
+    } else if (existing === res.name) return { ok: true, note: `Attached ${res.name}${why}`, input, why: res.why };
     const bytes = Uint8Array.from(atob(res.base64), (c) => c.charCodeAt(0));
     const f = new File([bytes], res.name, { type: res.mime });
     const dt = new DataTransfer();
@@ -409,7 +410,7 @@
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     await sleep(400);
-    return { ok: true, note: `Attached ${res.name}`, input };
+    return { ok: true, note: `Attached ${res.name}${why}`, input, why: res.why };
   }
 
   function mark(target, confidence, note) {
@@ -434,6 +435,8 @@
         }
         const r = await uploadFile(el, fileKind);
         if (r.input && r.input !== el) entry.el = r.input;
+        entry.why = r.why;
+        entry.missing = r.missing;
         mark(fileBox(entry.el), r.ok ? "high" : "low", r.note);
         return r.ok;
       }
@@ -527,10 +530,41 @@
     };
   }
 
+  /**
+   * Cover letters: when the form asks for one and the job has none, the Cover letter writer writes it
+   * (saved on Job Finder's Cover letters page), then it's attached or pasted in. mode: "required" or "always".
+   */
+  async function coverLetterPass(mode, progress) {
+    if (!lastFill) return 0;
+    const fields = lastFill.answers
+      .filter((a) => a.file === "cover_letter" || a.rule === "cover-letter-text")
+      .map((a) => ({ a, f: lastFill.fields.find((x) => x.key === a.key), entry: lastFill.elements.get(a.key) }))
+      .filter(({ f, entry }) => f && entry?.kind === "single" && !isFilled(entry) && (mode === "always" || f.required));
+    if (!fields.length) return 0;
+    progress("Writing a cover letter with the Cover letter writer…");
+    const res = await api("POST", "/api/apply/cover-letter", { url: location.href, ...idsOf() });
+    if (!res.ok) throw new Error(`Cover letter: ${res.data?.error || "couldn't write it"}`);
+    lastFill.ids.jobId = res.data.jobId || lastFill.ids.jobId;
+    let n = 0;
+    for (const { a, entry } of fields) {
+      if (fieldType(entry.el) === "file") {
+        if (await applyAnswer(entry, { ...a, file: "cover_letter" })) n++;
+      } else {
+        setValue(entry.el, res.data.content);
+        mark(entry.el, "medium", "Cover letter by the Cover letter writer: read it before sending");
+        n++;
+      }
+      if (res.data.written) aiKeys.add(a.key);
+    }
+    return n;
+  }
+
   async function write(options = {}, progress) {
     if (!lastFill) await fill({}, progress);
+    // A cover letter the form has room for, then the open questions.
+    if (!options.onlyRequired) await coverLetterPass("always", progress);
     const pending = lastFill.answers.filter((a) => {
-      if (!a.needsWriting) return false;
+      if (!a.needsWriting || a.rule === "cover-letter-text" || aiKeys.has(a.key)) return false;
       const f = lastFill.fields.find((x) => x.key === a.key);
       return !options.onlyRequired || f?.required;
     });
@@ -541,7 +575,7 @@
       const entry = lastFill.elements.get(a.key);
       if (!field || entry?.kind !== "single") continue;
       progress(`Writing answer ${done + 1} of ${pending.length}: “${field.label.slice(0, 60)}”…`);
-      const res = await api("POST", "/api/apply/answer", { question: field.label, maxLength: field.maxLength, url: location.href, ...lastFill.ids });
+      const res = await api("POST", "/api/apply/answer", { question: field.label, maxLength: field.maxLength, url: location.href, ...idsOf() });
       if (!res.ok) throw new Error(res.data?.error || "The AI couldn't write this one");
       setValue(entry.el, res.data.answer);
       mark(entry.el, "medium", "Written by AI: read and edit before submitting");
@@ -562,7 +596,7 @@
     progress(`Asking the AI about ${todo.length} question${todo.length === 1 ? "" : "s"}…`);
     const res = await api("POST", "/api/apply/pick", {
       url: location.href,
-      ...lastFill.ids,
+      ...idsOf(),
       fields: todo.map(({ key, label, type, options, multiple, maxLength }) => ({ key, label, type, options, multiple, maxLength })),
     });
     if (!res.ok) return 0;
@@ -576,6 +610,9 @@
     releaseInput();
     return n;
   }
+
+  /** The job ids known for this form, without empty ones. */
+  const idsOf = () => Object.fromEntries(Object.entries(lastFill?.ids || {}).filter(([, v]) => v));
 
   function isFilled(entry) {
     if (!entry) return false;
@@ -598,7 +635,10 @@
     if (entry.kind === "single") {
       const el = entry.el;
       const t = fieldType(el);
-      if (t === "file") return el.files?.[0]?.name || attachedName(el);
+      if (t === "file") {
+        const name = el.files?.[0]?.name || attachedName(el);
+        return name && entry.why ? `${name} · ${entry.why}` : name;
+      }
       if (t === "checkbox") return el.checked ? "Ticked" : "";
       if (t === "combobox") return selectedText(el);
       if (t === "select") return clean(el.options[el.selectedIndex]?.text || "");
@@ -666,6 +706,13 @@
 
       await fill({ auto: true, jobId: o.jobId, foundId: o.foundId }, progress);
       const notes = [];
+      if (o.ai?.ready && o.settings?.coverLetters !== "never") {
+        try {
+          await coverLetterPass(o.settings?.coverLetters === "always" ? "always" : "required", progress);
+        } catch (e) {
+          notes.push(e.message);
+        }
+      }
       if (o.ai?.ready && o.settings?.essays !== "none") {
         try {
           await write({ onlyRequired: o.settings?.essays !== "all" }, progress);

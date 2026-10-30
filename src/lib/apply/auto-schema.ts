@@ -23,8 +23,13 @@ export const autoApplySettingsSchema = z.object({
   essays: z.enum(["required", "all", "none"]).default("required"),
   /** Let the AI answer choice questions the answer engine doesn't know (always held for your OK). */
   aiPick: z.boolean().default(true),
-  /** Resume to attach: the PDF you uploaded here, or the one Job Finder builds from your LaTeX resume. */
-  resume: z.enum(["file", "generated"]).default("file"),
+  /**
+   * Resume to attach. match: tailored for the job, else your version for the job's field, else your uploaded PDF.
+   * file: tailored for the job, else your uploaded PDF. generated: tailored, else your field's version, else your master LaTeX resume.
+   */
+  resume: z.enum(["match", "file", "generated"]).default("match"),
+  /** Cover letters: write one with the Cover letter writer when a form requires one, whenever a form has a place for one, or never. */
+  coverLetters: z.enum(["required", "always", "never"]).default("required"),
   /** Seconds to wait between applications. */
   pauseSeconds: z.number().int().min(5).max(600).default(20),
   /** Leave held and needs-you applications open in a tab. */

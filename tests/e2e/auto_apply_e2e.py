@@ -1,8 +1,10 @@
 # End-to-end test of Auto apply: Job Finder's queue + the extension's worker on a
 # mock Greenhouse form built with the real React Select library.
 #
-# It WRITES to the database, so run it against a scratch database, never your real data:
-#   DATABASE_URL=file:/tmp/jf-auto.db npx next dev --turbopack -H 127.0.0.1 -p 3741
+# It WRITES to the database, so run it against a scratch database, never your real data.
+# A mock Claude API (started here on port 3799) writes the cover letter, so start the app with:
+#   DATABASE_URL=file:/tmp/jf-auto.db ANTHROPIC_BASE_URL=http://127.0.0.1:3799 ANTHROPIC_API_KEY=test \
+#     npx next dev --turbopack -H 127.0.0.1 -p 3741
 #   JOB_FINDER_URL=http://127.0.0.1:3741 FIXTURE_DIR=/path/to/built/fixture RESUME_PDF=/path/to/a.pdf \
 #     python3 tests/e2e/auto_apply_e2e.py
 # FIXTURE_DIR holds form.html and app.js: build them with tests/e2e/fixtures/build.sh /tmp/jf-fixture.
@@ -51,7 +53,8 @@ st, _ = api("PUT", "/api/apply/auto/settings", {"submit": "sure", "consent": Fal
 check(st == 200, "auto settings saved")
 st, g = api("POST", "/api/grab", {"source": "web", "by": "agent", "jobs": [
     {"url": "https://job-boards.greenhouse.io/e2eco/jobs/777", "title": "Data Analyst Intern", "company": "E2E Co", "location": "Chicago, IL"},
-    {"url": "https://job-boards.greenhouse.io/e2eco/jobs/779", "title": "Data Science Intern", "company": "E2E Co", "location": "Chicago, IL"},
+    {"url": "https://job-boards.greenhouse.io/e2eco/jobs/779", "title": "Data Science Intern", "company": "E2E Co", "location": "Chicago, IL",
+     "description": "Build data pipelines and models for our analytics team. Python and SQL. Summer 2027 in Chicago."},
     {"url": "https://www.linkedin.com/jobs/view/4999999999/", "title": "Analyst", "company": "LinkedIn Only Co", "location": "Chicago, IL"}]})
 check(st == 200 and g["added"] == 3, f"test jobs added ({g})")
 found = {j["title"]: j["id"] for j in api("GET", "/api/found?q=E2E%20Co&status=all")[1]["jobs"]}
@@ -74,6 +77,25 @@ class Form(BaseHTTPRequestHandler):
         data = self.rfile.read(int(self.headers.get("content-length") or 0))
         if self.path.endswith("/__submit"): submits.append(json.loads(data or b"{}"))
         self.send_response(200); self.send_header("content-length", "2"); self.end_headers(); self.wfile.write(b"ok")
+# A stand-in for the Claude API: a cover letter for the Cover letter writer, nothing for the rest.
+LETTER = ("Dear Hiring Manager,\n\nLast spring I rebuilt a messy sales dataset before a single model could run, and the patterns it "
+          "finally showed were worth every hour. That habit of starting from the data is what I would bring to E2E Co.\n\n"
+          "At my last internship I built the pipelines my team used every week.\n\nBest,\nAlex Doe\n===NOTES===\nLed with the data story.")
+claude_calls = []
+class Claude(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
+        claude_calls.append(body.get("model"))
+        text = LETTER if "cover letter" in json.dumps(body.get("system", "")).lower() and "write the cover letter" in json.dumps(body.get("messages", "")).lower() else '{"answers": []}'
+        events = [{"type": "message_start", "message": {"model": body.get("model")}},
+                  {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}},
+                  {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}, {"type": "message_stop"}]
+        out = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+        self.send_response(200); self.send_header("content-type", "text/event-stream"); self.send_header("content-length", str(len(out))); self.end_headers(); self.wfile.write(out)
+claude = ThreadingHTTPServer(("127.0.0.1", 3799), Claude)
+threading.Thread(target=claude.serve_forever, daemon=True).start()
+
 subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", f"{S}/k.pem", "-out", f"{S}/c.pem", "-days", "1", "-subj", "/CN=job-boards.greenhouse.io"], check=True, capture_output=True)
 server = ThreadingHTTPServer(("127.0.0.1", 0), Form)
 tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); tls.load_cert_chain(f"{S}/c.pem", f"{S}/k.pem")
@@ -124,7 +146,7 @@ async def main():
         race = next((v for k, v in ans.items() if k.startswith("Which racial")), None)
         check(q1 == "No" and q2 == "Yes" and sms == "No", f"authorization No, sponsorship Yes, SMS No ({q1}, {q2}, {sms})")
         check(race == "I don't wish to answer", f"multi-select EEO declines ({race})")
-        check(ans.get("Resume/CV") == "Alex-Doe-Resume.pdf", f"your uploaded resume attached ({ans.get('Resume/CV')})")
+        check((ans.get("Resume/CV") or "").startswith("Alex-Doe-Resume.pdf"), f"your uploaded resume attached ({ans.get('Resume/CV')})")
         check(not submits, "nothing submitted")
 
         # 2. You allow consent: retry, and it submits.
@@ -145,11 +167,16 @@ async def main():
         t = await run(tid3)
         print("   3:", t["status"], "|", t["summary"], t["checks"])
         check(t["status"] == "held" and any("without sponsorship" in c for c in t["checks"]), "unclear wording held for your OK")
+        check(any(c.startswith("Cover Letter") and "(AI)" in c for c in t["checks"]), f"the written cover letter is held for you to read ({t['checks']})")
+        check("claude-haiku-5-5" in claude_calls, f"written with the application model ({set(claude_calls)})")
+        st, _ = api("GET", f"/api/apply/cover-letter?foundId={found['Data Science Intern']}")
+        check(st != 404, f"the letter is saved on the Cover letters page (PDF request: {st}, 409/422 means no LaTeX here)")
         n_before = len(submits)
         api("POST", f"/api/apply/auto/{tid3}", {"action": "approve"})
         t = await run(tid3)
         print("   3b:", t["status"], "|", t["summary"])
         check(t["status"] == "submitted" and len(submits) == n_before + 1, "approved → submitted")
+        check("Last spring I rebuilt" in (submits[-1].get("text", {}).get("question_8") or ""), "the cover letter went into the form")
         st, again = api("POST", "/api/apply/auto", {"foundIds": [found["Data Science Intern"]]})
         check(not again["queued"] and "Already applied" in again["skipped"][0]["reason"], f"an applied job isn't queued again ({again['skipped']})")
         check(not errors, f"no page errors {errors[:3]}")

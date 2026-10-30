@@ -15,8 +15,8 @@ const bodySchema = z.object({
   question: z.string().trim().min(3).max(3000),
   maxLength: z.number().int().positive().max(20000).optional(),
   url: z.string().url().optional(),
-  jobId: z.string().optional(),
-  foundId: z.string().optional(),
+  jobId: z.string().nullish(),
+  foundId: z.string().nullish(),
   jobDescription: z.string().max(40000).optional(),
 });
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applicationUrl } from "@/lib/apply/apply-url";
+import { pickResumeVersion } from "@/lib/apply/resume-pick";
 import { autoApplySettingsSchema } from "@/lib/apply/auto-schema";
 import { decideSubmit } from "@/lib/apply/decide";
 import { applyProfileSchema, onlyProvided } from "@/lib/apply/profile-schema";
@@ -61,4 +62,21 @@ test("a partial save keeps the answers and settings it doesn't send", () => {
   assert.deepEqual(kept, { email: "new@example.edu" }, "no blank authorizedToWork, visaStatus…");
   const s = { consent: true };
   assert.deepEqual(onlyProvided(autoApplySettingsSchema.partial().parse(s), s), { consent: true });
+});
+
+test("resume versions: the one for the job's field", () => {
+  const versions = [
+    { id: "ds", title: "Resume – Data science & analytics", industry: "Data science & analytics" },
+    { id: "de", title: "Data engineering resume", industry: "Data engineering" },
+    { id: "q", title: "Resume – Quantitative research & trading", industry: "Quantitative research & trading" },
+    { id: "ec", title: "Resume – Economic consulting", industry: "Economic consulting" },
+  ];
+  assert.equal(pickResumeVersion(versions, { title: "Data Engineering Intern", roleType: "software" })?.version.id, "de");
+  assert.equal(pickResumeVersion(versions, { title: "Data Scientist Intern, Summer 2027", roleType: "data-science" })?.version.id, "ds");
+  assert.equal(pickResumeVersion(versions, { title: "Quantitative Trader Intern", roleType: "quant", industry: "quant" })?.version.id, "q");
+  assert.equal(
+    pickResumeVersion(versions, { title: "Analyst Intern", roleType: "consulting", industry: "consulting", description: "Economic and financial consulting for litigation" })?.version.id,
+    "ec",
+  );
+  assert.equal(pickResumeVersion(versions, { title: "Marketing Coordinator", roleType: "marketing" }), null, "nothing fits → your main resume");
 });

@@ -228,7 +228,10 @@ Every 30 s (an alarm) the worker asks `POST /api/apply/auto/next` for a queued
 application, opens it in a background tab and attaches `chrome.debugger`
 (focus emulation, so dropdowns open in a background tab, and real key presses;
 Chrome shows "started debugging this browser" meanwhile). The content script
-fills the form (`/api/apply/fill` with `auto: true`), writes required open
+fills the form (`/api/apply/fill` with `auto: true`; the resume is chosen by
+`src/lib/apply/resume-choice.ts`), writes a cover letter with the Cover letter
+writer when the form requires one and the job has none (`POST
+/api/apply/cover-letter`, then attaches the PDF or pastes the text), writes required open
 questions with the application model, lets the AI pick unknown required
 choices (`/api/apply/pick`), reports every field to
 `POST /api/apply/auto/:id/check` and gets back submit / hold / needs_you
@@ -275,15 +278,16 @@ without an Origin (curl, the MCP server) and from the extension are allowed.
 | `POST /api/apply/fill` | `{ url, pageTitle?, fields: [{key, label, type, options?, required?, maxLength?, hint?, multiple?}], jobId?, foundId?, auto? }` → an answer per field with confidence and reason (`hint` = the element id, e.g. Greenhouse's `school--0`) |
 | `POST /api/apply/answer` | `{ question, maxLength?, url/jobId/foundId }` → AI-written answer (remembered), with the application model |
 | `POST /api/apply/pick` | `{ url/jobId/foundId, fields }` → the AI's answers to choice/short questions from the resume (never legal, visa, EEO or consent questions) |
-| `GET /api/apply/resume?url=/jobId=/foundId=/resumeId=` | Resume PDF for the job: a tailored one, else the uploaded PDF (setting), else the master LaTeX resume |
+| `GET /api/apply/resume?url=/jobId=/foundId=/resumeId=` | Resume PDF for the job: tailored for it → the version for its field (industry versions, `src/lib/apply/resume-pick.ts`) → the uploaded PDF → the master (setting `resume`: match/file/generated); `x-resume-choice` says which |
 | `GET/POST/DELETE /api/apply/resume-file` | The resume PDF uploaded for applications (`?download=1` for the file) |
 | `GET /api/apply/auto?status=&batch=&limit=` | Auto apply's applications, counts, settings, AI and whether the browser helper checked in |
 | `POST /api/apply/auto` | `{ jobIds?, foundIds?, urls?, by? }` → queued and skipped (with reasons) |
 | `GET/PATCH/POST/DELETE /api/apply/auto/:id` | One application; the helper's report; `{ action: approve/retry/cancel/remove/submitted }` |
 | `POST /api/apply/auto/:id/check` | `{ fields, blockers? }` → submit / hold / needs_you by the settings |
 | `POST /api/apply/auto/next` | For the helper: claim the next queued application |
-| `GET/PUT /api/apply/auto/settings` | submit (sure/review/fill/always), consent, essays, aiPick, resume, pauseSeconds, keepTabs, enabled |
-| `GET /api/apply/cover-letter?url=/jobId=/id=` | Latest cover letter as PDF |
+| `GET/PUT /api/apply/auto/settings` | submit (sure/review/fill/always), consent, essays, aiPick, resume (match/file/generated), coverLetters (required/always/never), pauseSeconds, keepTabs, enabled |
+| `GET /api/apply/cover-letter?url=/jobId=/foundId=/id=` | Latest cover letter as PDF |
+| `POST /api/apply/cover-letter` | `{ url/jobId/foundId, write? }` → the job's letter, or a new one from the Cover letter writer (saved on Cover letters; found jobs are saved to My jobs first) |
 | `POST /api/apply/applied` | `{ url }` or `{ jobId }` (saves a found job first) |
 | `GET /api/apply/queue` | Saved jobs not applied yet, with readiness |
 | `GET /api/h1b`, `POST /api/h1b` (multipart `file`), `POST /api/h1b/download` | H-1B data |
@@ -305,7 +309,7 @@ Tools: `job_finder_status`, `search_found_jobs`, `get_found_job`,
 `add_company_board`, `grab_linkedin`, `list_searches`, `run_search`, `apply_queue`,
 `get_apply_profile`, `answer_application_fields`, `write_application_answer`,
 `get_resume_pdf` / `get_cover_letter_pdf` (saved to a temp file; the path is
-for a browser tool's file upload), `mark_applied`, `auto_apply`,
+for a browser tool's file upload), `write_cover_letter`, `mark_applied`, `auto_apply`,
 `auto_apply_status`, `auto_apply_action`. See `mcp/README.md`.
 
 ## Operating procedures (for an AI agent working for the owner)
@@ -451,6 +455,12 @@ widths and look for console errors. Extension scripts should pass
 ## Changelog
 
 **2026-10-30**
+- Resumes and cover letters in applications: the resume version for the job's
+  field is picked (tailored for the job → industry version → uploaded PDF →
+  master), and when a form requires a cover letter the Cover letter writer
+  writes one, saves it on Cover letters and the helper attaches it (held for
+  the owner's OK). "Write answers with AI" does the same by hand. MCP
+  `write_cover_letter`. Apply endpoints accept empty (null) job ids.
 - Auto apply: a queue of applications (`apply_tasks`, migration 0005), the
   extension's worker (background tab, real key presses for React Select,
   submit with outcome checks), four submit modes, a consent switch, written

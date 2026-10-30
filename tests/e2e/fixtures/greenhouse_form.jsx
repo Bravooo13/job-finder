@@ -68,11 +68,11 @@ function App() {
     e.preventDefault();
     const missing = combos.filter((c) => c.required && !(values[c.id] && (!Array.isArray(values[c.id]) || values[c.id].length))).map((c) => c.label);
     const form = e.target;
-    for (const el of form.querySelectorAll("input[required]")) if ((el.type === "checkbox" && !el.checked) || (el.type !== "checkbox" && !el.value && el.type !== "file")) missing.push(el.name || el.id);
+    for (const el of form.querySelectorAll("input[required], textarea[required]")) if ((el.type === "checkbox" && !el.checked) || (el.type !== "checkbox" && !el.value && el.type !== "file")) missing.push(el.name || el.id);
     if (!fileName) missing.push("Resume/CV");
     if (missing.length) return setErrors(missing);
     window.submittedValues = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Array.isArray(v) ? v.map((x) => x.label) : v?.label]));
-    window.submittedText = Object.fromEntries([...form.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([role=combobox])")].filter((x) => x.id).map((x) => [x.id, x.value]));
+    window.submittedText = Object.fromEntries([...form.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([role=combobox]), textarea")].filter((x) => x.id).map((x) => [x.id, x.value]));
     fetch("/__submit", { method: "POST", body: JSON.stringify({ token: params.get("token"), values: window.submittedValues, text: window.submittedText, file: fileName, gdpr: form.querySelector("#gdpr_demographic_data_consent_given_1").checked }) });
     history.pushState({}, "", location.pathname + "/confirmation" + location.search);
     setDone(true);
@@ -108,6 +108,11 @@ function App() {
         <input id="end-year--0" name="end-year--0" type="number" aria-required="true" />
       </Field>
       {combos.slice(6).map((c) => <Combo key={c.id} {...c} values={values} set={set} />)}
+      {WITH_EXTRA ? (
+        <Field id="question_8" label="Cover Letter" required>
+          <textarea id="question_8" name="question_8" required aria-required="true" />
+        </Field>
+      ) : null}
       <Field id="question_6" label="Anything else you'd like us to know? (optional)">
         <textarea id="question_6" name="question_6" />
       </Field>

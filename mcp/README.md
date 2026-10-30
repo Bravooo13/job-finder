@@ -48,7 +48,8 @@ somewhere else.
 | `get_apply_profile` | Your standard application answers |
 | `answer_application_fields` | Answers for a form's fields, with confidence |
 | `write_application_answer` | Drafts an open question's answer in your voice |
-| `get_resume_pdf`, `get_cover_letter_pdf` | Saves the PDF to a temp file and returns its path, for uploading |
+| `get_resume_pdf`, `get_cover_letter_pdf` | Saves the PDF to a temp file and returns its path, for uploading (the resume version for the job's field is picked for you) |
+| `write_cover_letter` | The job's cover letter, or a new one from the Cover letter writer, saved on the Cover letters page |
 | `mark_applied` | Marks a job applied after you submit |
 | `auto_apply` | Queue a batch for Auto apply (found job ids, My jobs ids or application URLs) |
 | `auto_apply_status` | Each application's status, what only you can do, answers to check, and whether the browser helper is running |

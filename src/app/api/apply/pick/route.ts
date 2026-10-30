@@ -21,8 +21,8 @@ const fieldSchema = z.object({
 
 const bodySchema = z.object({
   url: z.string().url().optional(),
-  jobId: z.string().optional(),
-  foundId: z.string().optional(),
+  jobId: z.string().nullish(),
+  foundId: z.string().nullish(),
   fields: z.array(fieldSchema).min(1).max(30),
 });
 

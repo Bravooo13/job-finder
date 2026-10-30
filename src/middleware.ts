@@ -46,7 +46,7 @@ export function middleware(request: NextRequest) {
       "access-control-allow-origin": origin!,
       "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "access-control-allow-headers": "content-type",
-      "access-control-expose-headers": "x-file-name, content-disposition",
+      "access-control-expose-headers": "x-file-name, x-resume-choice, content-disposition",
       "access-control-max-age": "600",
       vary: "origin",
     };

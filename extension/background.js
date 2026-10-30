@@ -43,6 +43,7 @@ async function fetchFile({ path }) {
       base64: btoa(binary),
       mime: res.headers.get("content-type") || "application/pdf",
       name: res.headers.get("x-file-name") || "file.pdf",
+      why: decodeURIComponent(res.headers.get("x-resume-choice") || ""),
     };
   } catch {
     return { ok: false, status: 0, error: "Can't reach Job Finder. Is it running?" };

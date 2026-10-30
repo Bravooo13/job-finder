@@ -384,7 +384,7 @@ const TOOLS = [
   {
     name: "get_resume_pdf",
     description:
-      "Builds the resume PDF to upload for a job (its tailored resume, else the master) and saves it to a temporary file. Returns the file path, for a browser tool's file upload.",
+      "Builds the resume PDF to upload for a job and saves it to a temporary file: the resume tailored for the job, else the owner's version for the job's field (e.g. a Data engineering version for a data engineering job), else the PDF he uploaded, else his master resume. Returns the file path, for a browser tool's file upload.",
     inputSchema: { type: "object", properties: { ...jobTarget, resumeId: str("A specific resume id.") } },
     run: async (a) => savePdf(`/api/apply/resume${await targetQuery(a)}`, "Resume.pdf"),
   },
@@ -393,6 +393,13 @@ const TOOLS = [
     description: "Saves the job's latest cover letter as a PDF in a temporary file and returns the path.",
     inputSchema: { type: "object", properties: { ...jobTarget } },
     run: async (a) => savePdf(`/api/apply/cover-letter${await targetQuery({ ...a, resumeId: undefined })}`, "Cover letter.pdf"),
+  },
+  {
+    name: "write_cover_letter",
+    description:
+      "The job's cover letter, or a new one from Job Finder's Cover letter writer (the owner's voice rules, his resume version for the job's field and the job description). It's saved on the Cover letters page; a found job is saved to My jobs first. Returns { id, jobId, content, written }. Then get_cover_letter_pdf with the jobId for the PDF. A new letter is AI-written: show it to the owner before it's sent.",
+    inputSchema: { type: "object", properties: { ...jobTarget } },
+    run: (a) => call("POST", "/api/apply/cover-letter", { url: a.url, jobId: a.jobId, foundId: a.foundId }),
   },
   {
     name: "mark_applied",
