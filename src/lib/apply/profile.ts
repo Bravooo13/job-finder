@@ -2,7 +2,7 @@ import "server-only";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { resumeEntries, resumeSkillGroups, resumes, settings } from "@/lib/db/schema";
-import { applyProfileSchema, type ApplyProfile } from "./profile-schema";
+import { applyProfileSchema, onlyProvided, type ApplyProfile } from "./profile-schema";
 
 const KEY = "apply.profile";
 
@@ -90,8 +90,9 @@ export async function getSavedApplyProfile(): Promise<Partial<ApplyProfile>> {
   return saved.success ? saved.data : {};
 }
 
+/** Saves the answers you send and keeps the rest (agents can send a few fields). */
 export async function saveApplyProfile(input: unknown): Promise<ApplyProfile> {
-  const parsed = applyProfileSchema.partial().parse(input);
+  const parsed = onlyProvided(applyProfileSchema.partial().parse(input), input);
   const current = await getSavedApplyProfile();
   const value = { ...current, ...parsed };
   await db

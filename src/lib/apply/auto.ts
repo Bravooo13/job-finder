@@ -9,6 +9,7 @@ import { saveFoundJob } from "@/lib/search/actions";
 import { applicationUrl } from "./apply-url";
 import { autoApplySettingsSchema, OPEN_STATUSES, type AutoApplySettings, type TaskStatus } from "./auto-schema";
 import { findJobForUrl, markAppliedByUrl } from "./jobs";
+import { onlyProvided } from "./profile-schema";
 
 // Auto apply: a queue of applications. The browser helper (Chrome extension)
 // claims one at a time, fills the form in your Chrome, and reports back.
@@ -28,7 +29,7 @@ export async function getAutoSettings(): Promise<AutoApplySettings> {
 }
 
 export async function saveAutoSettings(input: unknown): Promise<AutoApplySettings> {
-  const next = { ...(await getAutoSettings()), ...autoApplySettingsSchema.partial().parse(input) };
+  const next = { ...(await getAutoSettings()), ...onlyProvided(autoApplySettingsSchema.partial().parse(input), input) };
   await db
     .insert(settings)
     .values({ key: SETTINGS_KEY, value: next })

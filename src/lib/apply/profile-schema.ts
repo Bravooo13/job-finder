@@ -87,6 +87,12 @@ export type ApplyProfile = z.infer<typeof applyProfileSchema>;
 
 export const EMPTY_PROFILE: ApplyProfile = applyProfileSchema.parse({});
 
+/** Only the keys the caller sent. Parsing a partial schema fills every missing key with its default (""), which would wipe saved answers. */
+export function onlyProvided<T extends Record<string, unknown>>(parsed: T, input: unknown): Partial<T> {
+  const keys = new Set(input && typeof input === "object" ? Object.keys(input) : []);
+  return Object.fromEntries(Object.entries(parsed).filter(([k]) => keys.has(k))) as Partial<T>;
+}
+
 /** Plain-language labels for the form and for agents. */
 export const PROFILE_LABELS: Partial<Record<keyof ApplyProfile, string>> = {
   authorizedToWork: "Legally authorized to work in the US",

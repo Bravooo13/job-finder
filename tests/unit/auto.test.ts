@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applicationUrl } from "@/lib/apply/apply-url";
+import { autoApplySettingsSchema } from "@/lib/apply/auto-schema";
 import { decideSubmit } from "@/lib/apply/decide";
+import { applyProfileSchema, onlyProvided } from "@/lib/apply/profile-schema";
 
 const sure = [
   { label: "First Name*", required: true, filled: true, value: "Alex", confidence: "high" as const },
@@ -51,4 +53,12 @@ test("application links: Greenhouse's own form, Lever and Ashby apply pages, job
   assert.deepEqual(applicationUrl({ url: "https://www.linkedin.com/jobs/view/1/", applyUrl: "https://acme.wd5.myworkdayjobs.com/Careers/job/X_R1" }), {
     url: "https://acme.wd5.myworkdayjobs.com/Careers/job/X_R1",
   });
+});
+
+test("a partial save keeps the answers and settings it doesn't send", () => {
+  const sent = { email: "new@example.edu" };
+  const kept = onlyProvided(applyProfileSchema.partial().parse(sent), sent);
+  assert.deepEqual(kept, { email: "new@example.edu" }, "no blank authorizedToWork, visaStatus…");
+  const s = { consent: true };
+  assert.deepEqual(onlyProvided(autoApplySettingsSchema.partial().parse(s), s), { consent: true });
 });
