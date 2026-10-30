@@ -1,4 +1,6 @@
 import "server-only";
+import { recordAiUsage, spendStatus } from "@/lib/control/log";
+import { formatUsd } from "@/lib/control/shared";
 import { CLAUDE_MODELS, type AiSettings } from "./models";
 import { getAiSettings, getClaudeKey } from "./settings";
 
@@ -13,6 +15,8 @@ export interface ChatRequest {
   maxTokens: number;
   signal?: AbortSignal;
   onText: (text: string) => void;
+  /** What the call is for (an agent id), for the AI spending list. */
+  feature?: string;
 }
 
 export interface ChatResult {
@@ -25,9 +29,18 @@ export class AiError extends Error {}
 
 export const CLAUDE_URL = () => (process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com").replace(/\/+$/, "");
 
+/** Stops when today's AI spending reached your daily limit (Settings → What AI may do). */
+export async function assertUnderCap(s: AiSettings) {
+  if (s.provider !== "claude") return; // local models cost nothing
+  const { over, cap, spent } = await spendStatus();
+  if (over && cap !== null)
+    throw new AiError(`Today's AI limit is reached (${formatUsd(spent)} of ${formatUsd(cap)}). Raise it in Settings → What AI may do, or wait until tomorrow.`);
+}
+
 /** Sends a conversation to the AI picked in Settings and streams the reply through onText. */
 export async function runChat(req: ChatRequest, settings?: AiSettings): Promise<ChatResult> {
   const s = settings ?? (await getAiSettings());
+  await assertUnderCap(s);
   return s.provider === "ollama" ? runOllama(req, s) : runClaude(req, s);
 }
 
@@ -98,16 +111,28 @@ async function runClaude(req: ChatRequest, s: AiSettings): Promise<ChatResult> {
 
   let stopReason: string | null = null;
   let actualModel = model;
-  for await (const event of sseEvents(res.body)) {
-    if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-      req.onText(event.delta.text ?? "");
-    } else if (event.type === "message_start") {
-      actualModel = event.message?.model ?? model;
-    } else if (event.type === "message_delta") {
-      stopReason = event.delta?.stop_reason ?? stopReason;
-    } else if (event.type === "error") {
-      throw claudeError(529, JSON.stringify(event), model);
+  const usage = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  try {
+    for await (const event of sseEvents(res.body)) {
+      if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        req.onText(event.delta.text ?? "");
+      } else if (event.type === "message_start") {
+        actualModel = event.message?.model ?? model;
+        const u = event.message?.usage ?? {};
+        usage.input = u.input_tokens ?? 0;
+        usage.cacheWrite = u.cache_creation_input_tokens ?? 0;
+        usage.cacheRead = u.cache_read_input_tokens ?? 0;
+        usage.output = u.output_tokens ?? 0;
+      } else if (event.type === "message_delta") {
+        stopReason = event.delta?.stop_reason ?? stopReason;
+        if (event.usage?.output_tokens !== undefined) usage.output = event.usage.output_tokens;
+      } else if (event.type === "error") {
+        throw claudeError(529, JSON.stringify(event), model);
+      }
     }
+  } finally {
+    // Count what was used even when the reply was stopped halfway.
+    if (usage.input || usage.output) await recordAiUsage({ provider: "claude", model: actualModel, feature: req.feature, ...usage });
   }
   return { model: actualModel, stopReason };
 }
@@ -187,7 +212,14 @@ async function runOllama(req: ChatRequest, s: AiSettings): Promise<ChatResult> {
     buffer = done ? "" : (lines.pop() ?? "");
     for (const line of lines) {
       if (!line.trim()) continue;
-      let event: { message?: { content?: string }; done?: boolean; done_reason?: string; error?: string };
+      let event: {
+        message?: { content?: string };
+        done?: boolean;
+        done_reason?: string;
+        error?: string;
+        prompt_eval_count?: number;
+        eval_count?: number;
+      };
       try {
         event = JSON.parse(line);
       } catch {
@@ -195,7 +227,10 @@ async function runOllama(req: ChatRequest, s: AiSettings): Promise<ChatResult> {
       }
       if (event.error) throw new AiError(`Ollama: ${event.error}`);
       if (event.message?.content) req.onText(event.message.content);
-      if (event.done) stopReason = event.done_reason === "length" ? "max_tokens" : (event.done_reason ?? "end_turn");
+      if (event.done) {
+        stopReason = event.done_reason === "length" ? "max_tokens" : (event.done_reason ?? "end_turn");
+        await recordAiUsage({ provider: "ollama", model: s.ollamaModel, feature: req.feature, input: event.prompt_eval_count ?? 0, output: event.eval_count ?? 0 });
+      }
     }
     if (done) break;
   }

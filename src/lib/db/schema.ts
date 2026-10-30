@@ -444,6 +444,70 @@ export const applyAnswers = sqliteTable(
   (t) => [index("apply_answers_job_idx").on(t.jobId)],
 );
 
+// ------------------------------------------------------- who did what (control)
+
+/** Who did something: you, an AI inside Job Finder, an outside AI over MCP, the browser helper, or a schedule. */
+export type Actor = "you" | "assistant" | "outside" | "extension" | "scheduler";
+
+// Everything that changed something, by whom, with its AI cost.
+export const activityLog = sqliteTable(
+  "activity_log",
+  {
+    id: id(),
+    actor: text("actor").$type<Actor>().notNull(),
+    via: text("via"), // which agent or client: "Job Finder assistant", "claude-code"…
+    action: text("action").notNull(), // action name, e.g. save_found_job
+    title: text("title").notNull(), // one line for people
+    status: text("status").$type<"done" | "error" | "waiting" | "blocked" | "declined">().notNull().default("done"),
+    detail: text("detail", { mode: "json" }).$type<Record<string, unknown> | null>(),
+    costUsd: real("cost_usd").notNull().default(0),
+    requestId: text("request_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("activity_log_created_idx").on(t.createdAt), index("activity_log_actor_idx").on(t.actor, t.createdAt)],
+);
+
+// Things an AI asked to do that wait for your OK ("Ask me first").
+export const actionRequests = sqliteTable(
+  "action_requests",
+  {
+    id: id(),
+    actor: text("actor").$type<Actor>().notNull(),
+    via: text("via"),
+    action: text("action").notNull(),
+    title: text("title").notNull(),
+    input: text("input", { mode: "json" }).$type<unknown>().notNull(),
+    status: text("status").$type<"waiting" | "done" | "failed" | "declined">().notNull().default("waiting"),
+    result: text("result", { mode: "json" }).$type<unknown>(),
+    error: text("error"),
+    decidedAt: integer("decided_at", { mode: "timestamp_ms" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("action_requests_status_idx").on(t.status, t.createdAt)],
+);
+
+// Every AI call: tokens and what it cost, for the daily spend cap.
+export const aiUsage = sqliteTable(
+  "ai_usage",
+  {
+    id: id(),
+    actor: text("actor").$type<Actor>().notNull(),
+    via: text("via"),
+    feature: text("feature").notNull(), // agent id or what it was for
+    provider: text("provider").notNull(), // claude | ollama
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    webSearches: integer("web_searches").notNull().default(0),
+    costUsd: real("cost_usd").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_usage_created_idx").on(t.createdAt)],
+);
+
 // ---------------------------------------------------------------- relations
 
 export const companiesRelations = relations(companies, ({ many }) => ({
@@ -510,3 +574,6 @@ export type AiMessage = typeof aiMessages.$inferSelect;
 export type H1bEmployer = typeof h1bEmployers.$inferSelect;
 export type ApplyAnswer = typeof applyAnswers.$inferSelect;
 export type GrabRun = typeof grabRuns.$inferSelect;
+export type ActivityEntry = typeof activityLog.$inferSelect;
+export type ActionRequest = typeof actionRequests.$inferSelect;
+export type AiUsageRow = typeof aiUsage.$inferSelect;

@@ -5,6 +5,7 @@ import { forApplying } from "@/lib/ai/models";
 import { AiError, runChat, stripThinking } from "@/lib/ai/providers";
 import { getAiSettings } from "@/lib/ai/settings";
 import { findJobForUrl } from "@/lib/apply/jobs";
+import { asRequester } from "@/lib/control/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,10 @@ Rules:
 // POST /api/apply/pick: the AI answers choice and short questions the answer engine didn't know.
 // Body: { url? | jobId? | foundId?, fields: [{ key, label, type, options?, multiple? }] } → { answers: [{ key, value }] }
 export async function POST(request: Request) {
+  return asRequester(request, () => pick(request));
+}
+
+async function pick(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Bad request" }, { status: 400 });
   const b = parsed.data;
@@ -59,7 +64,7 @@ export async function POST(request: Request) {
     }));
     let text = "";
     await runChat(
-      { system, messages: [{ role: "user", content: JSON.stringify({ questions }) }], maxTokens: 1500, onText: (t) => (text += t) },
+      { system, messages: [{ role: "user", content: JSON.stringify({ questions }) }], maxTokens: 1500, feature: "apply-pick", onText: (t) => (text += t) },
       forApplying(await getAiSettings()),
     );
     const json = /\{[\s\S]*\}/.exec(stripThinking(text).replace(/```(?:json)?/g, ""))?.[0];

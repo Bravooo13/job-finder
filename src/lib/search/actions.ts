@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { findBoards, type FoundBoard } from "@/lib/boards/detect";
 import { forgetKnownBoards } from "@/lib/boards/learn";
+import { noteActivity } from "@/lib/control/log";
 import { db } from "@/lib/db";
 import { companies, companyBoards, discoveredJobs, jobs, searches } from "@/lib/db/schema";
 import { parseLocation } from "@/lib/geo";
@@ -43,6 +44,7 @@ export async function createSearch(input: SearchFormValues): Promise<ActionResul
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid search" };
   if (!splitLines(parsed.data.titles).length) return { ok: false, error: "Add at least one job title to look for" };
   const [row] = await db.insert(searches).values(toRow(parsed.data)).returning({ id: searches.id });
+  await noteActivity({ action: "create_search", title: `Created the search “${parsed.data.name}”`, detail: { searchId: row.id } });
   revalidateSearches();
   return { ok: true, data: { id: row.id } };
 }
@@ -52,6 +54,7 @@ export async function updateSearch(id: string, input: SearchFormValues): Promise
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid search" };
   if (!splitLines(parsed.data.titles).length) return { ok: false, error: "Add at least one job title to look for" };
   await db.update(searches).set(toRow(parsed.data)).where(eq(searches.id, id));
+  await noteActivity({ action: "update_search", title: `Changed the search “${parsed.data.name}”`, detail: { searchId: id } });
   revalidateSearches(id);
   return { ok: true, data: null };
 }
@@ -131,6 +134,7 @@ export async function saveFoundJob(id: string): Promise<ActionResult<{ jobId: st
     })
     .returning({ id: jobs.id });
   await db.update(discoveredJobs).set({ status: "saved", jobId: job.id }).where(eq(discoveredJobs.id, id));
+  await noteActivity({ action: "save_found_job", title: `Saved ${found.title} at ${found.company} to My jobs`, detail: { foundId: id, jobId: job.id } });
   revalidateSearches();
   revalidatePath("/jobs");
   return { ok: true, data: { jobId: job.id } };
@@ -139,6 +143,9 @@ export async function saveFoundJob(id: string): Promise<ActionResult<{ jobId: st
 export async function setFoundStatus(ids: string[], status: "new" | "dismissed"): Promise<ActionResult> {
   if (!ids.length) return { ok: true, data: null };
   await db.update(discoveredJobs).set({ status }).where(inArray(discoveredJobs.id, ids));
+  const first = ids.length === 1 ? await db.query.discoveredJobs.findFirst({ where: eq(discoveredJobs.id, ids[0]), columns: { title: true, company: true } }) : null;
+  const what = first ? `${first.title} at ${first.company}` : `${ids.length} found jobs`;
+  await noteActivity({ action: "dismiss_found_job", title: status === "dismissed" ? `Hid ${what}` : `Brought back ${what}`, detail: { foundIds: ids.slice(0, 50), status } });
   revalidateSearches();
   return { ok: true, data: null };
 }
@@ -175,6 +182,7 @@ export async function addCompanyBoard(board: FoundBoard): Promise<ActionResult> 
       set: { name: board.name, jobCount: board.jobCount, careersUrl: board.careersUrl, origin: "you" },
     });
   forgetKnownBoards();
+  await noteActivity({ action: "add_company_board", title: `Added ${board.name}'s job board (${board.provider})`, detail: { provider: board.provider, token: board.token } });
   revalidatePath("/companies");
   return { ok: true, data: null };
 }

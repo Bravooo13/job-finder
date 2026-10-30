@@ -1,4 +1,5 @@
 import "server-only";
+import { noteActivity } from "@/lib/control/log";
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { cleanJobUrl } from "@/lib/boards/adapters";
@@ -238,6 +239,11 @@ export async function saveGrabbed(input: GrabInput) {
     updated,
     boardsLearned,
   });
+  if (added || updated || boardsLearned) {
+    const from = { linkedin: "LinkedIn", handshake: "Handshake", indeed: "Indeed", web: input.pageUrl ? safeHost(input.pageUrl) : "a web page" }[input.source] ?? input.source;
+    const parts = [`${added} new job${added === 1 ? "" : "s"}`, updated ? `${updated} updated` : "", boardsLearned ? `${boardsLearned} company boards learned` : ""].filter(Boolean);
+    await noteActivity({ action: "send_grabbed_jobs", title: `Added jobs from ${from}: ${parts.join(", ")}`, detail: { source: input.source, pageUrl: input.pageUrl ?? null, added, updated } });
+  }
 
   return { received: items.length, added, updated, duplicates: results.filter((r) => r.status === "duplicate").length, boardsLearned, results };
 }

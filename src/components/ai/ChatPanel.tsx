@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Code2, Columns3, Gauge, History, Loader2, Mail, Mic, PenLine, Plus, Radar, Send, Settings2, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { ArrowUp, Bot, Code2, Columns3, Gauge, History, Loader2, Mail, Mic, PenLine, Plus, Radar, Send, Settings2, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ export const AGENT_ICONS: Record<Agent["icon"], typeof Wand2> = {
   pen: PenLine,
   columns: Columns3,
   radar: Radar,
+  bot: Bot,
 };
 
 export interface ChatContextInput {

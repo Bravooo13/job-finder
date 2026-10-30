@@ -26,7 +26,7 @@ def check(cond, msg):
 
 def api(method, path, body=None):
     req = urllib.request.Request(BASE + path, method=method, data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"content-type": "application/json"} if body is not None else {})
+                                 headers={"origin": BASE, **({"content-type": "application/json"} if body is not None else {})})  # as the owner's browser
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             return r.status, json.loads(r.read() or b"null")

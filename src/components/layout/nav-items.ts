@@ -5,6 +5,7 @@ import {
   Columns3,
   FileSignature,
   Inbox,
+  ListChecks,
   LayoutDashboard,
   Map,
   Radar,
@@ -31,4 +32,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/profile", label: "Profile & resumes", icon: UserRound },
   { href: "/cover-letters", label: "Cover letters", icon: FileSignature },
   { href: "/assistant", label: "AI agents", icon: Bot },
+  { href: "/activity", label: "Activity", icon: ListChecks },
 ];

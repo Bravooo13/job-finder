@@ -43,6 +43,13 @@
       "when": 1793314189207,
       "tag": "0005_auto_apply",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793380821948,
+      "tag": "0006_control",
+      "breakpoints": true
     }
   ]
 }

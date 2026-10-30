@@ -66,6 +66,23 @@ export function AssistantHub({
           })}
         </div>
 
+        {selected.tools ? (
+          <p className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-muted-foreground">
+            {selected.tools === "all"
+              ? "This agent uses Job Finder's actions and the other agents for you."
+              : "This agent searches and saves jobs for you."}{" "}
+            It does only what you allow in{" "}
+            <Link href="/settings#ai-permissions" className="font-medium text-primary hover:underline">
+              What AI may do
+            </Link>
+            ; steps set to &ldquo;Ask me first&rdquo; wait in{" "}
+            <Link href="/activity" className="font-medium text-primary hover:underline">
+              Activity
+            </Link>
+            .
+          </p>
+        ) : null}
+
         <div className="grid gap-4 rounded-lg border p-3">
           <div className="grid gap-1.5">
             <Label htmlFor="hub-resume">Resume</Label>

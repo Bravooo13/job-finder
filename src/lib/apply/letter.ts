@@ -6,6 +6,8 @@ import { buildSystemPrompt } from "@/lib/ai/context";
 import { forApplying } from "@/lib/ai/models";
 import { runChat, stripThinking } from "@/lib/ai/providers";
 import { getAiSettings } from "@/lib/ai/settings";
+import { currentActor } from "@/lib/control/context";
+import { noteActivity } from "@/lib/control/log";
 import { db } from "@/lib/db";
 import { companies, coverLetters, jobs } from "@/lib/db/schema";
 import { saveFoundJob } from "@/lib/search/actions";
@@ -56,7 +58,7 @@ export async function letterForApplication(ids: { jobId?: string | null; foundId
   const system = await buildSystemPrompt("cover-letter", { jobId, resumeId });
   let text = "";
   await runChat(
-    { system, messages: [{ role: "user", content: `Write the cover letter for the ${job.title} role at ${job.company}.` }], maxTokens: 4000, onText: (t) => (text += t) },
+    { system, messages: [{ role: "user", content: `Write the cover letter for the ${job.title} role at ${job.company}.` }], maxTokens: 4000, feature: "cover-letter", onText: (t) => (text += t) },
     forApplying(await getAiSettings()),
   );
   const { letter, notes } = splitLetter(stripThinking(text));
@@ -71,12 +73,16 @@ export async function letterForApplication(ids: { jobId?: string | null; foundId
       jobId,
       resumeId: resumeId ?? null,
       jobDescription: job.description,
-      instructions: "Written by Auto apply because the application asked for a cover letter.",
+      instructions:
+        currentActor()?.actor === "extension"
+          ? "Written by Auto apply because the application asked for a cover letter."
+          : "Written for this application by the Cover letter writer.",
       content: letter,
       notes: notes || null,
     })
     .returning({ id: coverLetters.id });
   revalidatePath("/cover-letters");
   revalidatePath(`/jobs/${jobId}`);
+  await noteActivity({ action: "write_cover_letter", title: `Wrote a cover letter for ${job.title} at ${job.company}`, detail: { coverLetterId: row.id, jobId } });
   return { id: row.id, jobId, content: letter, written: true };
 }

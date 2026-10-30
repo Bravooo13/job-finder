@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { actOnTask, getTask, reportTask } from "@/lib/apply/auto";
 import { TASK_STATUSES } from "@/lib/apply/auto-schema";
+import { runAsActionForAi } from "@/lib/control/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +50,11 @@ const actionSchema = z.object({ action: z.enum(["approve", "retry", "cancel", "r
 export async function POST(request: Request, { params }: Params) {
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "action must be approve, retry, cancel, remove or submitted" }, { status: 400 });
-  const task = await actOnTask((await params).id, parsed.data.action);
+  const id = (await params).id;
+  // An AI calling this follows What AI may do (approving asks you first by default).
+  const asAi = await runAsActionForAi(request, "auto_apply_action", { id, action: parsed.data.action });
+  if (asAi) return asAi;
+  const task = await actOnTask(id, parsed.data.action);
   return task ? NextResponse.json(task) : NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 

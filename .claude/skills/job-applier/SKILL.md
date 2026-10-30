@@ -13,9 +13,21 @@ them, and report back. That takes a handful of tool calls per batch instead of
 dozens of browser steps per form, so it is much cheaper. Don't fill forms in the
 browser yourself unless the owner asks for that.
 
-## 1. Check the setup (one call)
+## Permissions
 
-`auto_apply_status` with `limit: 5` (or `GET /api/apply/auto?limit=5`). Look at:
+Job Finder's owner decides what AIs may do (Settings → What AI may do), and its
+tools follow that for you too. A tool reply starting "Waiting for the owner"
+means the step is in his **Activity → Waiting for you** list: don't retry it or
+look for another way; tell him, and check `list_waiting` later for the result.
+A refused tool is turned off for AIs. Approving held applications and changing
+Auto apply's submit mode or consent switch ask him first by default. Everything
+you do is in his activity log.
+
+## 1. Check the setup (two calls)
+
+`job_finder_status` (AI, My answers, browser helper, what waits, today's AI
+spending against his daily limit, permissions), then `auto_apply_status` with
+`limit: 5` (or `GET /api/apply/auto?limit=5`). Look at:
 
 - `helper.running`: false means Chrome isn't open with the Job Finder Helper
   (version 0.2.0 or newer) loaded and switched on. Queued applications wait until
@@ -47,12 +59,21 @@ contact details are empty, say which ones; applications will stop on them.
 If the owner said "apply to these", queue them. If you chose the jobs yourself,
 list them (title, company, why) and get a yes first.
 
-## 3. Queue them (one call)
+## 3. Prepare when it helps
+
+Applications use the resume version for the job's field on their own
+(`list_resumes` shows them). If the owner applies to many jobs in a field that
+has no version, offer `make_resume_version` (the LaTeX editor tailors it).
+Cover letters are written by Auto apply when a form requires one; for a letter
+he wants to read first, use `write_cover_letter`. For a second opinion on fit,
+`ask_agent` with `job-fit`.
+
+## 4. Queue them (one call)
 
 `auto_apply` with `foundIds`, `jobIds` or `urls`. Keep the `batchId`. The reply
 says what was queued and what was skipped and why.
 
-## 4. Follow up
+## 5. Follow up
 
 Each application takes about one to three minutes, plus the pause between them
 in the settings. Check `auto_apply_status` with the `batchId` every few minutes,
@@ -60,8 +81,10 @@ not in a tight loop. Then report, grouped by status:
 
 - **submitted**: done, and already marked applied in My jobs.
 - **held**: waiting for the owner's OK. Show the `checks` (answers that were
-  guessed or written by the AI). Use `auto_apply_action` with `approve` only
-  after the owner says yes for that application.
+  guessed or written by the AI). He approves them in Activity → Waiting for
+  you or on Apply → Auto apply. Only when he says yes in the conversation for
+  that application, use `approve_application` (it may still wait for his OK in
+  Job Finder; that's expected).
 - **needs_you**: show `needs` exactly (a street address, a transcript upload,
   a consent box, a CAPTCHA, a sign-in). The form is usually left open in a tab.
   When the owner has fixed My answers or uploaded the file, `retry`. If the owner

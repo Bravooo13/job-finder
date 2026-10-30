@@ -8,8 +8,11 @@ tailor LaTeX resumes and cover letters with AI agents, fill (and, if you let
 it, submit) application forms from your saved answers, and track every
 application from saved to offer.
 
-AI agents can drive it too, through a JSON API and an MCP server: see
-[CLAUDE.md](./CLAUDE.md).
+You can do everything yourself, or hand it to AI: the **Job Finder assistant**
+inside the app, or an outside AI (Claude Code, Claude Desktop) through the MCP
+server. Both use the same set of actions, follow the same permissions (**Settings
+→ What AI may do**: Do it, Ask me first or Never, plus a daily AI spending limit),
+and show up in one **Activity** log. See [CLAUDE.md](./CLAUDE.md).
 
 Everything runs on your own computer. Your jobs and resumes live in a single
 SQLite file under `data/`, which never leaves your machine.
@@ -110,11 +113,13 @@ changes in the chat next to it ("make the opening punchier"), edit it yourself,
 then copy it, download it or print it to PDF. Every letter and its chat is
 saved.
 
-**AI agents**: eight agents, each with its own instructions, that read your
+**AI agents**: ten agents, each with its own instructions, that read your
 resume, the job and your notes about yourself:
 
 | Agent | What it does |
 | --- | --- |
+| Job Finder assistant | Runs your search end to end with Job Finder's actions as tools: finds and sorts jobs, asks the other agents for resumes and letters, queues Auto apply |
+| Job scout | Searches LinkedIn, company boards and careers pages, then shortlists |
 | Resume tailor | Rewrites bullets for a job or industry, finds keyword gaps, says what to cut |
 | LaTeX editor | Edits the LaTeX resume: industry versions, one-page fixes, compile errors |
 | Cover letter writer | Writes and revises cover letters with strict rules against generic AI phrasing |
@@ -127,6 +132,15 @@ resume, the job and your notes about yourself:
 Use them on the AI agents page, in a resume's AI chat tab, next to each cover
 letter, or from a job ("Check fit", "Interview prep"). Chats are saved. You can
 edit each agent's instructions in Settings.
+
+**Who does what (Activity)**: you and AI use the same actions. In **Settings →
+What AI may do** you choose, per kind of action (find jobs, ask agents, write
+resumes and letters, queue Auto apply, update My jobs, change settings, approve
+held applications), whether an AI may *do it*, must *ask you first* or may
+*never* do it, and set a daily AI spending limit. The rules apply to the Job
+Finder assistant, the Job scout and outside AIs over MCP. **Activity** shows
+what waits for your OK (with Approve and Decline), everything you, the AIs, the
+browser helper and schedules did, and today's AI spending by agent.
 
 **AI models**: use Claude with your own API key (stored encrypted on your
 computer) or a free local model through [Ollama](https://ollama.com). Switch
@@ -174,6 +188,8 @@ want.
 - [x] Apply helper: fill application forms from your saved answers
 - [x] Compare jobs side by side
 - [x] Agent API and MCP server
+- [x] One set of actions for you and for AI: the Job Finder assistant, permissions,
+      Waiting for you, an activity log and a daily AI spending limit
 - [ ] Job alert emails
 - [x] AI agents with Claude or Ollama: resume tailoring, LaTeX editing, cover
       letters, interview prep, job fit and networking messages
@@ -213,6 +229,8 @@ The main endpoints are below; [CLAUDE.md](./CLAUDE.md) has the full list.
 | `POST /api/grab`, `POST /api/grab/page` | Add jobs read in the browser; read a careers page |
 | `POST /api/apply/fill` | Answers for an application form's fields |
 | `GET /api/apply/resume` | The resume PDF to upload for a job |
+| `GET /api/actions`, `POST /api/actions/:name` | Everything an AI can do, and running one (follows What AI may do) |
+| `GET /api/control` | What waits for you and today's AI spending |
 | `POST /api/ai/chat` | `{ agent, message, threadId?, context }`: streams an agent's reply as NDJSON |
 | `GET /api/settings`, `PUT /api/settings` | AI provider and model, notes about you (never the API key) |
 | `POST /api/latex/compile` | `{ latex }`: returns the PDF, or `{ error, log }` |

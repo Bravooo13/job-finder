@@ -65,6 +65,7 @@ export async function testAi(): Promise<ActionResult<{ reply: string; model: str
         system: "You are a connection test. Reply with one short friendly sentence.",
         messages: [{ role: "user", content: "Say hello to the Job Finder user in under 12 words." }],
         maxTokens: 60,
+        feature: "test",
         signal: AbortSignal.timeout(60_000),
         onText: (t) => (reply += t),
       },

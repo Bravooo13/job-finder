@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Compass, Menu, Settings } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { APP_NAME } from "@/lib/constants";
@@ -41,8 +41,32 @@ function SettingsLink({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** How many things wait for you (AI requests, held applications), checked every half minute. */
+function useWaitingCount(): number {
+  const pathname = usePathname();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    const check = () =>
+      fetch("/api/control", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!stop && d?.waiting) setCount(Number(d.waiting.total) || 0);
+        })
+        .catch(() => {});
+    void check();
+    const t = setInterval(check, 30_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [pathname]);
+  return count;
+}
+
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const waiting = useWaitingCount();
   return (
     <nav className="flex flex-col gap-1" aria-label="Main">
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
@@ -62,6 +86,11 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           >
             <Icon className="size-4" />
             {label}
+            {href === "/activity" && waiting > 0 ? (
+              <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[11px] leading-none font-semibold text-primary-foreground tabular-nums" aria-label={`${waiting} waiting for you`}>
+                {waiting}
+              </span>
+            ) : null}
           </Link>
         );
       })}

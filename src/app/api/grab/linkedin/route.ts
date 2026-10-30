@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getLinkedInRun, startLinkedInRun, waitForRun } from "@/lib/grab/linkedin-runs";
 import { LINKEDIN_LIMITS } from "@/lib/grab/linkedin";
+import { actorFromRequest, withActor } from "@/lib/control/context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,9 @@ export async function POST(request: Request) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Bad request" }, { status: 400 });
   const { wait, ...options } = parsed.data;
   try {
-    const run = startLinkedInRun(options);
+    // The grab goes on in the background; keep who started it for the activity log.
+    const who = actorFromRequest(request);
+    const run = await withActor(who.actor, who.via, async () => startLinkedInRun(options));
     if (wait) await waitForRun(run, wait * 1000);
     return NextResponse.json(run, { status: run.state === "running" ? 202 : 200 });
   } catch (e) {

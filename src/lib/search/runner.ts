@@ -1,4 +1,5 @@
 import "server-only";
+import { noteActivity } from "@/lib/control/log";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { ADAPTERS, SIMPLIFY_LISTS, cleanJobUrl } from "@/lib/boards/adapters";
 import { directoryBoards } from "@/lib/boards/directory";
@@ -99,6 +100,12 @@ export async function startSearchRun(searchId: string, trigger: "manual" | "sche
     throw error;
   }
 
+  await noteActivity({
+    action: "run_search",
+    title: `${trigger === "schedule" ? "Ran" : "Started"} the search “${search.name}”`,
+    detail: { searchId, runId: run.id },
+    ...(trigger === "schedule" ? { actor: "scheduler" as const, via: "Daily search" } : {}),
+  });
   void executeRun(search, run.id, controller.signal)
     .catch(async (error) => {
       console.error("Search run failed", error);

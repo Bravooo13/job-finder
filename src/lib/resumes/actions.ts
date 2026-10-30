@@ -3,6 +3,7 @@
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
+import { noteActivity } from "@/lib/control/log";
 import { db } from "@/lib/db";
 import { jobs, resumeEntries, resumeSkillGroups, resumes } from "@/lib/db/schema";
 import { parseSkills } from "@/lib/jobs/schema";
@@ -349,6 +350,7 @@ export async function createIndustryVersion(input: {
     latex = generated.ok ? generated.data : null;
   }
   await db.update(resumes).set({ industry, latex }).where(eq(resumes.id, id));
+  await noteActivity({ action: "make_resume_version", title: `Made the resume version “${input.title.trim() || `Resume – ${industry}`}” for ${industry}`, detail: { resumeId: id, industry } });
   revalidateResume(id);
   return { ok: true, data: { id } };
 }

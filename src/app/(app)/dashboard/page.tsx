@@ -8,6 +8,7 @@ import { ImportResumeButton } from "@/components/profile/ImportResumeButton";
 import { ScoreBadge } from "@/components/found/FoundList";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { waitingCounts } from "@/lib/control/log";
 import { getDashboardData } from "@/lib/dashboard/queries";
 import { listCompanyNames, listResumeOptions } from "@/lib/jobs/queries";
 import { foundCounts, listFound, listSearches } from "@/lib/search/queries";
@@ -29,13 +30,14 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 }
 
 export default async function DashboardPage() {
-  const [data, companyNames, resumes, found, counts, searches] = await Promise.all([
+  const [data, companyNames, resumes, found, counts, searches, waiting] = await Promise.all([
     getDashboardData(),
     listCompanyNames(),
     listResumeOptions(),
     listFound({ status: "new", limit: 6 }),
     foundCounts(),
     listSearches(),
+    waitingCounts(),
   ]);
   const { totals } = data;
   const isEmpty = totals.tracked === 0 && searches.length === 0;
@@ -69,6 +71,30 @@ export default async function DashboardPage() {
           </>
         }
       />
+
+      {waiting.total ? (
+        <Card className="mb-6 border-primary/30 bg-primary/5">
+          <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold">
+                {waiting.total} thing{waiting.total === 1 ? "" : "s"} waiting for you
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {[
+                  waiting.requests ? `${waiting.requests} step${waiting.requests === 1 ? "" : "s"} an AI asked to do` : "",
+                  waiting.held ? `${waiting.held} application${waiting.held === 1 ? "" : "s"} held for your OK` : "",
+                  waiting.needsYou ? `${waiting.needsYou} application${waiting.needsYou === 1 ? "" : "s"} needing you` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+            <Button asChild>
+              <Link href="/activity">Review</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {isEmpty ? (
         <Card className="mb-6 border-primary/30 bg-primary/5">

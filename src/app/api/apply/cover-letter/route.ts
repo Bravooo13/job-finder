@@ -4,6 +4,7 @@ import { z } from "zod";
 import { findJobById, findJobForUrl } from "@/lib/apply/jobs";
 import { letterForApplication } from "@/lib/apply/letter";
 import { AiError } from "@/lib/ai/providers";
+import { asRequester } from "@/lib/control/context";
 import { db } from "@/lib/db";
 import { coverLetters, resumes } from "@/lib/db/schema";
 import { letterToLatex } from "@/lib/latex/template";
@@ -59,7 +60,9 @@ export async function POST(request: Request) {
   const b = parsed.data;
   const match = (await findJobById(b)) ?? (b.url ? await findJobForUrl(b.url) : null);
   try {
-    const r = await letterForApplication({ jobId: match?.jobId ?? b.jobId, foundId: match?.foundId ?? b.foundId }, { write: b.write !== false });
+    const r = await asRequester(request, () =>
+      letterForApplication({ jobId: match?.jobId ?? b.jobId, foundId: match?.foundId ?? b.foundId }, { write: b.write !== false }),
+    );
     if ("error" in r) return NextResponse.json({ error: r.error }, { status: 404 });
     return NextResponse.json(r);
   } catch (error) {

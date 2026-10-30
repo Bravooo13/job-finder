@@ -4,8 +4,10 @@ import { z } from "zod";
 import { getAgent, type AgentId } from "@/lib/ai/agents";
 import { buildSystemPrompt } from "@/lib/ai/context";
 import { AiError, runChat, stripThinking, type ChatMessage } from "@/lib/ai/providers";
-import { runScout } from "@/lib/ai/scout";
 import { getAiSettings } from "@/lib/ai/settings";
+import { runToolLoop } from "@/lib/ai/tool-loop";
+import { withActor } from "@/lib/control/context";
+import { toolsFor } from "@/lib/control/run";
 import { db } from "@/lib/db";
 import { aiMessages, aiThreads } from "@/lib/db/schema";
 
@@ -114,19 +116,24 @@ export async function POST(request: Request) {
       let text = "";
       let model: string | null = null;
       try {
-        const result = await (agent.id === "job-scout" ? runScout : runChat)(
-          {
-            system,
-            messages,
-            maxTokens: agent.maxTokens,
-            signal: abort.signal,
-            onText: (t) => {
-              text += t;
-              send({ type: "text", text: t });
-            },
+        const req = {
+          system,
+          messages,
+          maxTokens: agent.maxTokens,
+          signal: abort.signal,
+          feature: agent.id,
+          onText: (t: string) => {
+            text += t;
+            send({ type: "text", text: t });
           },
-          settings,
-        );
+        };
+        // Agents with tools act on Job Finder as an AI (your permissions apply to what they do);
+        // the others just write, for you.
+        const result = agent.tools
+          ? await withActor("assistant", agent.name, () =>
+              runToolLoop({ ...req, tools: toolsFor({ set: agent.tools!, via: agent.name }), webSearch: agent.id === "job-scout" || agent.id === "assistant", agentName: agent.name }, settings),
+            )
+          : await withActor("you", undefined, () => runChat(req, settings));
         model = result.model;
         send({ type: "done", stopReason: result.stopReason, model: result.model });
       } catch (error) {

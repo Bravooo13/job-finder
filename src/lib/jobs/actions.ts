@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { classifyJob } from "@/lib/classify";
 import { APPLIED_STATUSES, JOB_STATUS_VALUES, type JobStatus } from "@/lib/constants";
+import { noteActivity } from "@/lib/control/log";
 import { db } from "@/lib/db";
 import { companies, jobNotes, jobs } from "@/lib/db/schema";
 import { parseLocation } from "@/lib/geo";
@@ -129,11 +130,14 @@ export async function updateJobStatus(
   const parsed = z.enum(JOB_STATUS_VALUES).safeParse(status);
   if (!parsed.success) return { ok: false, error: "Unknown status" };
   const current = await db
-    .select({ dateApplied: jobs.dateApplied })
+    .select({ dateApplied: jobs.dateApplied, status: jobs.status, title: jobs.title, company: companies.name })
     .from(jobs)
+    .innerJoin(companies, eq(jobs.companyId, companies.id))
     .where(eq(jobs.id, id))
     .limit(1);
   if (!current[0]) return { ok: false, error: "Job not found" };
+  if (current[0].status !== parsed.data)
+    await noteActivity({ action: "update_my_job", title: `Moved ${current[0].title} at ${current[0].company} to ${parsed.data}`, detail: { jobId: id, from: current[0].status, to: parsed.data } });
   await db
     .update(jobs)
     .set({
@@ -174,6 +178,7 @@ export async function addNote(jobId: string, content: string): Promise<ActionRes
   const parsed = noteSchema.safeParse(content);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   await db.insert(jobNotes).values({ jobId, content: parsed.data });
+  await noteActivity({ action: "update_my_job", title: `Added a note: “${parsed.data.slice(0, 80)}${parsed.data.length > 80 ? "…" : ""}”`, detail: { jobId } });
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, data: null };
 }

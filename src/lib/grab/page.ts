@@ -52,6 +52,7 @@ async function jobsWithAi(input: PageInput): Promise<GrabJob[]> {
       },
     ],
     maxTokens: 4000,
+    feature: "grab-page",
     onText: (t) => (reply += t),
   });
   const json = /\[[\s\S]*\]/.exec(reply)?.[0];

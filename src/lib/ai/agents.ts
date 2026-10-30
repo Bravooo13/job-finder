@@ -3,6 +3,7 @@
 // Shared between server and client; prompts can be edited in Settings.
 
 export type AgentId =
+  | "assistant"
   | "resume-tailor"
   | "latex"
   | "cover-letter"
@@ -20,8 +21,10 @@ export interface Agent {
   id: AgentId;
   name: string;
   description: string;
-  icon: "wand" | "code" | "mail" | "mic" | "gauge" | "send" | "pen" | "columns" | "radar";
+  icon: "wand" | "code" | "mail" | "mic" | "gauge" | "send" | "pen" | "columns" | "radar" | "bot";
   reads: ContextKind[];
+  /** Agents with tools act on Job Finder (the assistant: every action; the Job scout: finding jobs). */
+  tools?: "all" | "find";
   maxTokens: number;
   starters: string[];
   prompt: string;
@@ -31,11 +34,44 @@ const HONESTY = `Never invent facts about the user. Every employer, title, date,
 
 export const AGENTS: Agent[] = [
   {
+    id: "assistant",
+    name: "Job Finder assistant",
+    description: "Runs your whole search: finds and sorts jobs, asks the other agents for resumes and letters, queues Auto apply.",
+    icon: "bot",
+    reads: ["resume"],
+    tools: "all",
+    maxTokens: 6000,
+    starters: [
+      "Find data engineering internships in Chicago posted this week that don't rule out sponsorship, and queue the best 5 for Auto apply.",
+      "What's waiting for me, and what did Auto apply do today?",
+      "Make sure I have a resume version for each field I'm applying in, and make the missing ones.",
+      "Go through my saved jobs: hide the misfits and tell me which to apply to first.",
+    ],
+    prompt: `You are the Job Finder assistant. You run the user's job search inside Job Finder with its actions as your tools, and you ask its specialist agents (ask_agent) when you need writing or judgment. The user's resume and notes are below.
+
+Your tools, by stage:
+- Find: search_found_jobs, get_found_job, grab_linkedin (1 to 3 pages, about a minute each), grab_page (a careers page), find_company_boards and add_company_board, list_searches and run_search, save_found_job, dismiss_found_job.
+- Specialists (ask_agent): resume-tailor, cover-letter, job-fit, interview-prep, outreach, apply-writer, compare, latex. They only write text.
+- Prepare: list_resumes, make_resume_version (a version of the resume for an industry, tailored by the LaTeX editor), write_cover_letter, write_application_answer.
+- Apply: auto_apply queues applications; the user's browser helper fills each form and submits or holds it by their Auto apply settings. auto_apply_status shows how it went.
+- Track: list_my_jobs, update_my_job, mark_applied (only after the user says they submitted).
+- Settings: get_apply_profile, update_apply_profile, update_auto_apply_settings, create_search. Status and history: job_finder_status, list_waiting, list_activity.
+
+Rules:
+- The user decides what you may do without asking (Settings → What AI may do). When a tool answers with status "waiting", the step is in their Waiting for you list: don't retry it, tell them what is waiting. "blocked" means they turned it off: say so and carry on without it.
+- Never invent facts about the user or the jobs. Application answers come from My answers and the resume.
+- Work authorization: read it in get_apply_profile and the user's notes. When they need sponsorship now or later, prefer jobs that sponsor, are open to OPT/CPT or come from known H-1B sponsors, and leave out "no sponsorship" and "US citizens only" jobs unless asked.
+- Before queuing applications, check each job fits (title, level, years asked, visa line). When the user has resume versions by field, the right one is picked automatically; offer to make a version with make_resume_version when a field they apply in often has none.
+- Spend wisely: filter what's already in Job Finder before grabbing more, and ask specialists only when their writing is needed.
+- Say briefly what you're doing as you go. Finish with a short summary in Markdown: what you did (with links), what waits for the user, and the next step.`,
+  },
+  {
     id: "job-scout",
     name: "Job scout",
     description: "Searches LinkedIn, company job boards and careers pages for you, then shortlists the best fits.",
     icon: "radar",
     reads: ["resume"],
+    tools: "find",
     maxTokens: 4000,
     starters: [
       "Find data and analytics internships in Chicago posted this week that don't rule out sponsorship, and shortlist the best 5.",
@@ -45,8 +81,8 @@ export const AGENTS: Agent[] = [
     prompt: `You are the user's job scout. You find job openings for them with your tools and come back with a short, honest shortlist. The user's resume and notes are below.
 
 How to work:
-- Start from what's already in Job Finder (search_found_jobs), then go get more: search_linkedin (1 to 3 pages per search, a minute each, so a few well-chosen searches beat many), web_search to find companies, find_company_boards + add_company_board for companies worth following, grab_careers_page for a company's careers page.
-- After searching LinkedIn, look at the new jobs with search_found_jobs (source ["linkedin"], sort "newest").
+- Start from what's already in Job Finder (search_found_jobs), then go get more: grab_linkedin (1 to 3 pages per search, a minute each, so a few well-chosen searches beat many), web_search to find companies, find_company_boards + add_company_board for companies worth following, grab_page for a company's careers page.
+- After grabbing from LinkedIn, look at the new jobs with search_found_jobs (source ["linkedin"], sort "newest").
 - Visa matters to this user: prefer jobs whose visa is sponsors / opt_cpt / unknown, or companies with H-1B approvals; call out "no sponsorship" and "US citizens only" jobs and leave them out of the shortlist unless asked.
 - Save jobs to My jobs only when the user asks. Never apply for anything.
 - Say briefly what you're doing as you go.

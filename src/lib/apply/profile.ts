@@ -1,4 +1,5 @@
 import "server-only";
+import { noteActivity } from "@/lib/control/log";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { resumeEntries, resumeSkillGroups, resumes, settings } from "@/lib/db/schema";
@@ -99,5 +100,8 @@ export async function saveApplyProfile(input: unknown): Promise<ApplyProfile> {
     .insert(settings)
     .values({ key: KEY, value })
     .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } });
+  const changed = Object.keys(parsed).filter((k) => JSON.stringify((current as Record<string, unknown>)[k]) !== JSON.stringify((parsed as Record<string, unknown>)[k]));
+  if (changed.length)
+    await noteActivity({ action: "update_apply_profile", title: `Changed My answers: ${changed.slice(0, 6).join(", ")}${changed.length > 6 ? ` and ${changed.length - 6} more` : ""}`, detail: { fields: changed } });
   return getApplyProfile();
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { noteActivity } from "@/lib/control/log";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
@@ -29,7 +30,11 @@ export async function getAutoSettings(): Promise<AutoApplySettings> {
 }
 
 export async function saveAutoSettings(input: unknown): Promise<AutoApplySettings> {
-  const next = { ...(await getAutoSettings()), ...onlyProvided(autoApplySettingsSchema.partial().parse(input), input) };
+  const current = await getAutoSettings();
+  const next = { ...current, ...onlyProvided(autoApplySettingsSchema.partial().parse(input), input) };
+  const changed = (Object.keys(next) as (keyof AutoApplySettings)[]).filter((k) => next[k] !== current[k]);
+  if (changed.length)
+    await noteActivity({ action: "update_auto_apply_settings", title: `Changed Auto apply settings: ${changed.map((k) => `${k} → ${String(next[k])}`).join(", ")}`, detail: { changed } });
   await db
     .insert(settings)
     .values({ key: SETTINGS_KEY, value: next })
@@ -205,6 +210,14 @@ export async function enqueueApplications(input: EnqueueInput): Promise<EnqueueR
     if (needsLink) result.skipped.push({ title: c.title, company: c.company, reason: target.error });
     else result.queued.push({ id: row.id, title: c.title, company: c.company, url });
   }
+  if (result.queued.length || result.skipped.length) {
+    const names = result.queued.slice(0, 3).map((q) => q.company).join(", ");
+    await noteActivity({
+      action: "auto_apply",
+      title: `Queued ${result.queued.length} application${result.queued.length === 1 ? "" : "s"} for Auto apply${names ? ` (${names}${result.queued.length > 3 ? "…" : ""})` : ""}${result.skipped.length ? `, skipped ${result.skipped.length}` : ""}`,
+      detail: { batchId, queued: result.queued.length, skipped: result.skipped },
+    });
+  }
   return result;
 }
 
@@ -303,6 +316,18 @@ export async function reportTask(id: string, report: TaskReport): Promise<ApplyT
     if (jobId) set.jobId = jobId;
   }
   const [row] = await db.update(applyTasks).set(set).where(eq(applyTasks.id, id)).returning();
+  const what = `${task.title} at ${task.company}`;
+  const line =
+    report.status === "submitted"
+      ? `Submitted the application for ${what}`
+      : report.status === "held"
+        ? `Held ${what} for your OK`
+        : report.status === "needs_you"
+          ? `${what} needs you${report.needs?.length ? `: ${report.needs.slice(0, 2).join("; ")}` : ""}`
+          : report.status === "failed"
+            ? `Couldn't apply to ${what}${report.summary ? `: ${report.summary.slice(0, 120)}` : ""}`
+            : null;
+  if (line && task.status !== report.status) await noteActivity({ action: "auto_apply_report", title: line, status: report.status === "failed" ? "error" : "done", detail: { taskId: id, status: report.status } });
   return row ?? null;
 }
 
@@ -310,6 +335,9 @@ export async function reportTask(id: string, report: TaskReport): Promise<ApplyT
 export async function actOnTask(id: string, action: "approve" | "retry" | "cancel" | "remove" | "submitted"): Promise<ApplyTask | null> {
   const task = await getTask(id);
   if (!task) return null;
+  const what = `${task.title} at ${task.company}`;
+  const said = { approve: `Approved ${what}: it will be submitted`, retry: `Asked Auto apply to try ${what} again`, cancel: `Canceled ${what}`, remove: `Removed ${what} from Auto apply`, submitted: `Marked ${what} as submitted` }[action];
+  if (action !== "submitted") await noteActivity({ action: action === "approve" ? "approve_application" : "auto_apply_action", title: said, detail: { taskId: id, action } });
   if (action === "remove") {
     await db.delete(applyTasks).where(eq(applyTasks.id, id));
     return task;
