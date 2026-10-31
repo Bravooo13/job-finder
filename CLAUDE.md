@@ -587,6 +587,15 @@ widths and look for console errors. Extension scripts should pass
   `size=invisible`) is no longer reported as an "I'm not a robot" box to tick;
   only a real checkbox widget blocks. A challenge after Submit still comes
   back as "needs you" with the tab left open.
+- Answer engine, from the first live run (Stripe, Coinbase, DoorDash, C3.ai,
+  Pinterest): "What U.S. state do you reside in?" (was read as a
+  near-the-office question), "authorized to work in the country where this
+  position is located" (was answered with the country), Greenhouse employment
+  rows ("Company name", "Title"), "By June 2030 will you have your Master's…"
+  and "available to begin full-time before September 2028" (from the
+  graduation date), referral-program questions (No unless How did you hear
+  says a referral), "Hispanic or Latinx" with a "Not" answer, and transgender
+  identity (declined).
 
 **2026-10-30**
 - One set of actions for the owner and for AI (`src/lib/control`): 35 actions,

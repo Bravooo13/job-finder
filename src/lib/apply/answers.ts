@@ -172,6 +172,14 @@ function containsOption(opts: string[], wanted: string): string | null {
 
 const isChoice = (f: FormField) => ["select", "radio", "combobox"].includes(f.type) || (f.type === "checkbox" && (f.options?.length ?? 0) > 1);
 
+/** "By June 2030" → "2030-06" (end of that month counts as before). */
+function monthOf(q: string): string | null {
+  const m = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[a-z]*,? (\d{4})\b/.exec(q);
+  if (!m) return null;
+  const i = MONTH_NAMES.findIndex((n) => n.toLowerCase().startsWith(m[1].slice(0, 3)));
+  return i < 0 ? null : `${m[2]}-${String(i + 1).padStart(2, "0")}`;
+}
+
 function monthYear(ym: string): string {
   const m = /^(\d{4})-(\d{2})/.exec(ym);
   if (!m) return ym;
@@ -385,8 +393,16 @@ const RULES: Rule[] = [
   },
   {
     id: "residence-country",
-    test: (q) => /country\b.{0,40}\b(reside|resident|live|living|located|residence|based)|\b(reside|live|located|based)\b.{0,40}\bcountry|country of (residence|current residence)/.test(q),
+    test: (q) =>
+      // "authorized to work in the country where this position is located" is a work-authorization question.
+      !/authori[sz]ed|eligib|legally|permit|sponsor/.test(q) &&
+      /country\b.{0,40}\b(reside|resident|live|living|located|residence|based)|\b(reside|live|located|based)\b.{0,40}\bcountry|country of (residence|current residence)/.test(q),
     answer: (p, f) => pickOrText(f, countryNames(p.country)),
+  },
+  {
+    id: "residence-state",
+    test: (q) => !/\b(city|town)\b/.test(q) && /(what|which) (u\.? ?s\.? )?state\b.{0,40}\b(reside|live|located|based)\b|state of (current )?residence|state (do )?you (currently )?(live|reside)/.test(q),
+    answer: (p, f) => (p.state ? pickOrText(f, [p.state, STATE_CODES[p.state.trim().toLowerCase()] ?? ""].filter(Boolean)) : textAnswer("", "low", "Add your state in My info")),
   },
   {
     id: "residence-city",
@@ -408,6 +424,48 @@ const RULES: Rule[] = [
     id: "current-title",
     test: (q) => /(current|previous|most recent|present|last)( or (previous|most recent|current|last))? (job |position |role )?title|title (of|at) your (current|most recent|last) (job|position|role)/.test(q),
     answer: (p) => textAnswer(p.currentTitle, "high", "Add your latest job title in My info"),
+  },
+  // Greenhouse's employment rows ("Company name", "Title" next to the education rows).
+  {
+    id: "employment-company",
+    test: (q, f) => !isChoice(f) && (/^company( name)?$/.test(q) || (/^(company|employer)/.test(q) && /company|employ/.test(f.hint ?? ""))),
+    answer: (p) => textAnswer(p.currentEmployer, "high", "Add your latest employer in My info"),
+  },
+  {
+    id: "employment-title",
+    test: (q, f) => !isChoice(f) && (/^(job )?title$/.test(q) || (/^title/.test(q) && /title/.test(f.hint ?? ""))),
+    answer: (p) => textAnswer(p.currentTitle, "high", "Add your latest job title in My info"),
+  },
+  // "By June 2030, will you have your Master's degree…?": from your graduation date.
+  {
+    id: "degree-by-date",
+    test: (q, f) => isChoice(f) && /\b(will|do) you (have|hold|complete|earn|finish)\b.{0,60}\bdegree\b|\bdegree\b.{0,40}\b(by|before) [a-z]+ \d{4}/.test(q) && /\b(19|20)\d{2}\b/.test(q),
+    answer: (p, f, q) => {
+      const by = monthOf(q);
+      if (!p.graduation || !by) return { value: null, confidence: "low", note: "Add your graduation date in My info" };
+      // A master's question answered from your current degree; a bachelor's you already hold.
+      const wantsMasters = /master|m\.?s\b|graduate degree/.test(q);
+      if (wantsMasters && !/^m/i.test(degreeLevel(p.degree) ?? "")) return { value: null, confidence: "low", note: "Check which degree it asks about" };
+      return yn(p.graduation.slice(0, 7) <= by ? "yes" : "no", "high", `You graduate ${monthYear(p.graduation)}`);
+    },
+  },
+  // "I am available to begin a full-time role before September 2028": after you graduate.
+  {
+    id: "full-time-start",
+    test: (q, f) => isChoice(f) && /\b(begin|start|available)\b.{0,50}\bfull[- ]time\b.{0,50}\b(before|by|after|in) [a-z]+ \d{4}/.test(q),
+    answer: (p, _f, q) => {
+      const by = monthOf(q);
+      if (!p.graduation || !by) return { value: null, confidence: "low", note: "Add your graduation date in My info" };
+      const after = /\bafter\b/.test(q);
+      const ok = after ? p.graduation.slice(0, 7) >= by : p.graduation.slice(0, 7) < by;
+      return yn(ok ? "yes" : "no", "high", `You graduate ${monthYear(p.graduation)}`);
+    },
+  },
+  // Referred through a program or by someone? No, unless "How did you hear" says a referral.
+  {
+    id: "referred",
+    test: (q, f) => isChoice(f) && /\b(were|are) you (being )?referred\b|referral program/.test(q),
+    answer: (p) => (/referr/i.test(p.hearAbout) ? { value: null, confidence: "low", note: "Say who referred you" } : yn("no", "high", `You found it on ${p.hearAbout || "your own"}`)),
   },
   {
     id: "offer-deadline",
@@ -781,7 +839,17 @@ const RULES: Rule[] = [
 
   // ---- voluntary self-identification (EEO); default is "decline"
   { id: "eeo-gender", test: (q) => /\bgender\b|\bsex\b/.test(q), answer: (p, f) => eeo(f, p.gender) },
-  { id: "eeo-hispanic", test: (q) => /hispanic|latin[oa]/.test(q), answer: (p, f) => eeo(f, p.hispanicLatino) },
+  {
+    id: "eeo-hispanic",
+    test: (q) => /hispanic|latin[oax]/.test(q),
+    answer: (p, f) =>
+      /^(no|not)\b/i.test(p.hispanicLatino.trim()) && isChoice(f)
+        ? pickOrText(f, ["No", "Not Hispanic or Latino", "Not Hispanic or Latinx", "Not Hispanic/Latino", "I am not Hispanic or Latino"])
+        : /^yes\b/i.test(p.hispanicLatino.trim()) && isChoice(f)
+          ? pickOrText(f, ["Yes", "Hispanic or Latino", "Hispanic or Latinx"])
+          : eeo(f, p.hispanicLatino),
+  },
+  { id: "eeo-transgender", test: (q) => /transgender|gender identity.{0,30}differ|sex assigned at birth/.test(q), answer: (_p, f) => eeo(f, "") },
   { id: "eeo-race", test: (q) => /\brac(e|ial)\b|ethnicit/.test(q), answer: (p, f) => eeo(f, p.race) },
   { id: "eeo-veteran", test: (q) => /veteran|military service|armed forces/.test(q), answer: (p, f) => eeo(f, p.veteran) },
   { id: "eeo-disability", test: (q) => /disabilit/.test(q), answer: (p, f) => eeo(f, p.disability) },

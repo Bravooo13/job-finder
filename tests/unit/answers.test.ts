@@ -299,3 +299,31 @@ test("the same question in other words gets the same answer", () => {
   assert.equal(ask("Date of Birth (MM/DD/YYYY)").value, "04/05/2003");
   assert.equal(ask("Are you open to working in person in our Chicago office?", "radio", ["Yes", "No"]).value, "Yes");
 });
+
+test("questions from live forms: state of residence, work authorization by country, employment rows, dates, referral, EEO wording", () => {
+  const p = applyProfileSchema.parse({
+    state: "Illinois", country: "United States", degree: "M.S.", graduation: "2028-05", authorizedToWork: "yes",
+    hispanicLatino: "Not", currentEmployer: "Acme Analytics", currentTitle: "Data Analyst", hearAbout: "LinkedIn",
+  });
+  const yn = ["Yes", "No"];
+  const got = answerFields(
+    [
+      { key: "state", label: "What U.S State do you currently reside in?*", type: "combobox", options: ["California", "IL", "New York"] },
+      { key: "auth", label: "Are you legally authorized to work in the country where this position is located?*", type: "combobox", options: yn },
+      { key: "hisp", label: "Are you Hispanic or Latinx?*", type: "combobox", options: ["Yes", "No", "I don't wish to answer"] },
+      { key: "trans", label: "Do you identify as transgender?*", type: "combobox", options: ["Yes", "No", "I don't wish to answer"] },
+      { key: "co", label: "Company name*", type: "text", hint: "company-name-0" },
+      { key: "title", label: "Title*", type: "text", hint: "title-0" },
+      { key: "ms", label: "By June 2030, will you have your Masters Degree in Data Science or a related field?*", type: "combobox", options: yn },
+      { key: "ft", label: "I am available to begin a potential full-time role before September 2028.*", type: "combobox", options: yn },
+      { key: "ft2", label: "I am available to begin a potential full-time role before March 2028.*", type: "combobox", options: yn },
+      { key: "ref", label: "Are you being referred to this role as part of the Campus Referral Program?*", type: "combobox", options: yn },
+    ],
+    p,
+  );
+  const v = Object.fromEntries(got.map((a) => [a.key, a.value]));
+  assert.deepEqual(v, {
+    state: "IL", auth: "Yes", hisp: "No", trans: "I don't wish to answer", co: "Acme Analytics", title: "Data Analyst",
+    ms: "Yes", ft: "Yes", ft2: "No", ref: "No",
+  });
+});
