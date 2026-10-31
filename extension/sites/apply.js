@@ -431,7 +431,24 @@
     if (note) el.title = `Job Finder: ${note}`;
   }
 
+  /**
+   * The field's element as it is on the page now. React forms redraw parts of themselves (Greenhouse
+   * redraws the education rows after reading a resume), leaving the element read earlier detached.
+   */
+  function live(entry) {
+    if (!entry) return entry;
+    if (entry.kind === "single" && !entry.el.isConnected && entry.el.id) {
+      const now = document.getElementById(entry.el.id);
+      if (now) entry.el = now;
+    } else if (entry.kind === "group" && entry.inputs.some((i) => !i.isConnected) && entry.inputs[0].name) {
+      const now = [...document.querySelectorAll(`input[name="${CSS.escape(entry.inputs[0].name)}"]`)];
+      if (now.length === entry.inputs.length) entry.inputs = now;
+    }
+    return entry;
+  }
+
   async function applyAnswer(entry, answer) {
+    entry = live(entry);
     if (!entry) return false;
     const { value, confidence, note, file: fileKind, alts } = answer;
     if (entry.kind === "single") {
@@ -510,7 +527,7 @@
       .join("|");
   }
 
-  /** Waits until the form stops changing: at least 2.5 s, then 1.5 s with no changes, 12 s at most. */
+  /** Waits until the form stops changing: 2 s quiet once it changed, else 1.5 s quiet after 2.5 s; 12 s at most. */
   async function settle(before) {
     const root = document.querySelector("form") || document.body;
     let last = Date.now();
@@ -521,8 +538,7 @@
       while (Date.now() - start < 12000) {
         await sleep(250);
         const quiet = Date.now() - last;
-        if (Date.now() - start >= 2500 && quiet >= 1500) break;
-        if (formShape() !== before && quiet >= 1000) break;
+        if (formShape() !== before ? quiet >= 2000 : Date.now() - start >= 2500 && quiet >= 1500) break;
       }
     } finally {
       obs.disconnect();
@@ -699,6 +715,7 @@
   const idsOf = () => Object.fromEntries(Object.entries(lastFill?.ids || {}).filter(([, v]) => v));
 
   function isFilled(entry) {
+    entry = live(entry);
     if (!entry) return false;
     if (entry.kind === "single") {
       const el = entry.el;

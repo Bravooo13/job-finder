@@ -118,10 +118,14 @@ function App() {
           />
         )}
       </div>
-      {combos.slice(0, 6).map((c) => <Combo key={c.id} {...c} values={values} set={set} />)}
-      <Field id={`end-year--${row}`} label="End date year" required>
-        <input key={row} id={`end-year--${row}`} name={`end-year--${row}`} type="number" aria-required="true" />
-      </Field>
+      {combos.slice(0, 2).map((c) => <Combo key={c.id} {...c} values={values} set={set} />)}
+      {/* Picking a school redraws the whole education row (new elements, same ids), as React forms do. */}
+      <div key={`edu-${row}-${values[`school--${row}`]?.value ?? ""}`} className="education">
+        {combos.slice(2, 6).map((c) => <Combo key={c.id} {...c} values={values} set={set} />)}
+        <Field id={`end-year--${row}`} label="End date year" required>
+          <input id={`end-year--${row}`} name={`end-year--${row}`} type="number" aria-required="true" />
+        </Field>
+      </div>
       <button type="button" aria-label="Remove education" onClick={() => setRow((r) => r + 1)}>
         Remove education
       </button>

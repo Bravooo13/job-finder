@@ -573,6 +573,10 @@ widths and look for console errors. Extension scripts should pass
   attached file only clicks the file's own remove button, never "Remove
   education". The mock form in `tests/e2e/fixtures` rebuilds its education row
   after an upload, like Greenhouse.
+- Extension 0.2.2: fields the page redrew after they were read (React
+  re-mounts, same id) are found again by id before filling and checking, so
+  answers no longer go into detached elements. The mock form redraws its
+  education row when a school is picked.
 
 **2026-10-30**
 - One set of actions for the owner and for AI (`src/lib/control`): 35 actions,
