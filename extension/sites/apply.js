@@ -830,7 +830,11 @@
 
       const states = fieldStates();
       const blockers = [];
-      if ([...document.querySelectorAll('iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="hcaptcha.com"]')].some((f) => visible(f) && f.getBoundingClientRect().height > 40)) {
+      if ([...document.querySelectorAll('iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="hcaptcha.com"]')].some(
+          // A real "I'm not a robot" box. The invisible kind only shows a badge in the corner
+          // (size=invisible, .grecaptcha-badge) and has nothing to tick.
+          (f) => visible(f) && f.getBoundingClientRect().height > 40 && !/[?&]size=invisible\b/.test(f.src) && !f.closest(".grecaptcha-badge"),
+        )) {
         blockers.push("Tick the “I'm not a robot” box");
       }
       const answers = states.map((s) => ({ label: s.label.slice(0, 500), value: s.value || "", confidence: s.confidence, rule: s.rule, required: s.required }));

@@ -583,6 +583,10 @@ widths and look for console errors. Extension scripts should pass
   only lacks what the owner must do on the page ("I'm not a robot", consent
   ticks, a CAPTCHA) stays open in its tab, ready for his tick and Submit;
   other finished forms close unless "keep tabs" is on.
+- Extension 0.2.4: Greenhouse's invisible reCAPTCHA (the badge in the corner,
+  `size=invisible`) is no longer reported as an "I'm not a robot" box to tick;
+  only a real checkbox widget blocks. A challenge after Submit still comes
+  back as "needs you" with the tab left open.
 
 **2026-10-30**
 - One set of actions for the owner and for AI (`src/lib/control`): 35 actions,
