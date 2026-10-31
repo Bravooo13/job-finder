@@ -26,7 +26,7 @@ Greenhouse form built with real React Select (`tests/e2e/auto_apply_e2e.py`),
 not yet on live sites.
 
 2026-10-30 (later): **one set of actions, two drivers.** Everything Job Finder
-can do is an action in `src/lib/control/actions.ts` (35 of them). The owner runs
+can do is an action in `src/lib/control/actions.ts` (38 of them). The owner runs
 them with the website's buttons; AIs run the same actions as tools: the new
 **Job Finder assistant** (in-app boss agent: every action plus `ask_agent` to
 use the specialists), the Job scout (the finding actions), and outside AIs over
@@ -446,6 +446,22 @@ specialist writing (resume tailor, cover letter writer, job fit…),
 `make_resume_version` for a field's resume, `write_cover_letter`, `auto_apply`.
 They cost a few calls and show up in his activity log.
 
+**On the owner's Claude plan (Claude Code, no API credits).** Job Finder's
+built-in AI (the assistant, `ask_agent`, `write_cover_letter`,
+`write_application_answer`, `make_resume_version` without `latex`, Auto apply's
+own essays) uses his API key. When you work for him in Claude Code, do the
+writing yourself and hand it over instead:
+- Resume for a field: `get_resume` (text + LaTeX) → tailor it → `make_resume_version`
+  with `industry` and your `latex` (kept only if it compiles).
+- Cover letter: `get_found_job` / `get_my_job` for the description → write it in
+  his voice (his `cover-letter-writer` skill has the rules) → `save_cover_letter`.
+  Show it to him first.
+- Open questions: before queuing, write answers to the questions the posting
+  asks and `save_application_answer` for each (question worded as on the form).
+  Auto apply uses them, held for his OK because an AI wrote them.
+- Finding, saving, queuing and checking (`search_found_jobs`, `auto_apply`,
+  `auto_apply_status`…) cost nothing either way.
+
 **Apply (preferred: Auto apply).** Follow `.claude/skills/job-applier/SKILL.md`:
 check `auto_apply_status` (is the helper running, what are the settings),
 queue the jobs with `auto_apply`, check back every few minutes, and report
@@ -491,6 +507,9 @@ Always use the owner's actual My answers; the table only explains the wording.
   `~/Desktop/Job-Finder` is a git clone too; after pushing, sync
   it with `git fetch && git reset -q origin/main` (keeps untracked `data/` and
   `USER.md`).
+- **Claude Code on the Mac:** the Mac folder has a local `.mcp.json`
+  (gitignored, it holds this computer's path) that adds the `job-finder` MCP
+  server; Claude Code opened in that folder asks once to approve it.
 - **Deploying to the Mac from a cloud session:** the Mac shell tool is a Linux
   VM that sees the folder at `$HOME/mnt/Job-Finder` but can't start or stop
   the Mac's processes. Pack the changed files into a tgz with a **new file name
@@ -550,6 +569,10 @@ widths and look for console errors. Extension scripts should pass
   `update_auto_apply_settings`, `create_search`, `approve_application`,
   `list_waiting`, `list_activity`. Migration 0006; e2e test
   `tests/e2e/control_e2e.py`.
+- Hand-over actions for an AI on its own plan (Claude Code): `get_resume`,
+  `make_resume_version` with `latex`, `save_cover_letter`,
+  `save_application_answer`. Answers an AI saved are used by Fill and Auto
+  apply but held for the owner's OK (`saved-ai-answer`, medium confidence).
 - Resumes and cover letters in applications: the resume version for the job's
   field is picked (tailored for the job → industry version → uploaded PDF →
   master), and when a form requires a cover letter the Cover letter writer

@@ -4,7 +4,8 @@
     "baseUrl": "..",
     "paths": {
       "@/*": ["./src/*"],
-      "server-only": ["./tests/stubs/server-only.ts"]
+      "server-only": ["./tests/stubs/server-only.ts"],
+      "next/cache": ["./tests/stubs/next-cache.ts"]
     }
   }
 }

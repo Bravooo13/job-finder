@@ -117,5 +117,34 @@ test("AIs follow the permissions; Ask me first waits for you; you can approve or
   assert.equal((await listActivity({ limit: 500 })).length, before);
 });
 
+test("an outside AI can hand Job Finder its own writing", async () => {
+  const { runAction } = await import("@/lib/control/run");
+  const { fillAnswers } = await import("@/lib/apply/fill");
+  const as = { actor: "outside" as const, via: "claude-code" };
+  let out = await runAction(
+    "send_grabbed_jobs",
+    { source: "web", jobs: [{ url: "https://example.com/jobs/data-intern", title: "Data Intern", company: "Example Co", description: "Python and SQL." }] },
+    as,
+  );
+  assert.equal(out.status, "done");
+  out = await runAction("search_found_jobs", { q: "Data Intern", status: "all" }, as);
+  const foundId = (out as { result: { jobs: { id: string }[] } }).result.jobs[0].id;
+
+  const question = "Why do you want to work at Example Co?";
+  out = await runAction("save_application_answer", { foundId, question, answer: "Because of the data team." }, as);
+  assert.equal(out.status, "done", JSON.stringify(out));
+  const jobId = (out as { result: { jobId: string } }).result.jobId;
+  const filled = await fillAnswers({ url: "https://example.com/apply", fields: [{ key: "why", label: question, type: "textarea" }], jobId });
+  assert.equal(filled.answers[0].value, "Because of the data team.");
+  assert.equal(filled.answers[0].confidence, "medium", "AI-written answers are held for the owner");
+
+  out = await runAction("save_cover_letter", { jobId, content: "Dear hiring team, ".padEnd(260, "x") }, as);
+  assert.equal(out.status, "done", JSON.stringify(out));
+  out = await runAction("list_cover_letters", {}, as);
+  assert.equal((out as { result: { letters: { jobId: string }[] } }).result.letters[0].jobId, jobId);
+  out = await runAction("save_cover_letter", { jobId, content: "too short" }, as);
+  assert.equal(out.status, "invalid");
+});
+
 // The search scheduler keeps an interval alive once its module is loaded.
 after(() => setTimeout(() => process.exit(), 50).unref());

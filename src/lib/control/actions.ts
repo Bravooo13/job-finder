@@ -2,15 +2,15 @@ import "server-only";
 import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { AGENTS, extractLatex, getAgent, type AgentId } from "@/lib/ai/agents";
-import { buildSystemPrompt, type ChatContext } from "@/lib/ai/context";
+import { buildSystemPrompt, resumeToText, type ChatContext } from "@/lib/ai/context";
 import { forApplying } from "@/lib/ai/models";
 import { runChat, stripThinking } from "@/lib/ai/providers";
 import { getAiSettings, getAiStatus } from "@/lib/ai/settings";
 import { actOnTask, enqueueApplications, getAutoSettings, getResumeFile, getTask, helperLastSeen, listTasks, saveAutoSettings } from "@/lib/apply/auto";
 import { SUBMIT_MODES, TASK_STATUSES, type TaskStatus } from "@/lib/apply/auto-schema";
 import { fillAnswers, fillSchema } from "@/lib/apply/fill";
-import { findJobById, findJobForUrl, markAppliedByUrl } from "@/lib/apply/jobs";
-import { letterForApplication } from "@/lib/apply/letter";
+import { findJobById, findJobForUrl, markAppliedByUrl, rememberAnswer } from "@/lib/apply/jobs";
+import { letterForApplication, saveLetterForApplication } from "@/lib/apply/letter";
 import { getApplyProfile, saveApplyProfile } from "@/lib/apply/profile";
 import { applyQueue } from "@/lib/apply/queue";
 import { writeAnswerSchema, writeApplicationAnswer } from "@/lib/apply/write-answer";
@@ -31,6 +31,7 @@ import { compileLatex } from "@/lib/latex/tectonic";
 import { createIndustryVersion, saveResumeLatex } from "@/lib/resumes/actions";
 import { addCompanyBoard, createSearch, runSearch, saveFoundJob, setFoundStatus } from "@/lib/search/actions";
 import { newSearchDefaults } from "@/lib/search/defaults";
+import { getResume } from "@/lib/resumes/queries";
 import { listSearches } from "@/lib/search/queries";
 import { SEARCH_SOURCES } from "@/lib/search/schema";
 import { currentActor } from "./context";
@@ -134,6 +135,16 @@ async function jobNames(ids: { foundIds?: string[]; jobIds?: string[] }): Promis
 }
 
 const show = (v: unknown) => (typeof v === "string" ? `“${clip(v, 60)}”` : JSON.stringify(v));
+
+/** The My jobs id for a job given by jobId, foundId or URL (a found job is saved to My jobs first). */
+async function trackedJobId(a: { url?: string; jobId?: string | null; foundId?: string | null }): Promise<string> {
+  const match = (await findJobById(a)) ?? (a.url ? await findJobForUrl(a.url) : null);
+  let jobId = match?.jobId ?? a.jobId ?? null;
+  const foundId = match?.foundId ?? a.foundId ?? null;
+  if (!jobId && foundId) jobId = unwrap(await saveFoundJob(foundId)).jobId;
+  if (!jobId) throw new Error("Give the job: jobId, foundId, or a URL Job Finder knows.");
+  return jobId;
+}
 
 async function masterResumeId(): Promise<string | undefined> {
   const row = await db.select({ id: resumes.id }).from(resumes).orderBy(desc(resumes.isMaster), desc(resumes.updatedAt)).limit(1);
@@ -328,6 +339,21 @@ export const ACTIONS: ActionDef[] = [
         .orderBy(desc(resumes.isMaster), asc(resumes.title));
       const file = await getResumeFile();
       return { resumes: rows, uploadedPdf: file ? { name: file.name } : null };
+    },
+  }),
+  action({
+    name: "get_resume",
+    title: "Read a resume",
+    description:
+      "One resume as plain text plus its LaTeX source, so you can tailor it yourself and save the result with make_resume_version (latex).",
+    group: "read",
+    input: z.object({ id: z.string().max(100).optional().describe("Resume id from list_resumes (default the master).") }),
+    status: () => "Reading a resume",
+    run: async (a) => {
+      const id = a.id ?? (await masterResumeId());
+      const r = id ? await getResume(id) : null;
+      if (!r) throw new Error("No resume with that id");
+      return { id: r.id, title: r.title, industry: r.industry, isMaster: r.isMaster, text: resumeToText(r), latex: r.latex };
     },
   }),
   action({
@@ -625,7 +651,7 @@ export const ACTIONS: ActionDef[] = [
     name: "make_resume_version",
     title: "Make a resume version for an industry",
     description:
-      "Copies the master resume (or fromId) as a new version for an industry, e.g. 'Data engineering'. With tailor (default true) the LaTeX editor rewrites it for that field (and the job, if given) and it's kept only if it compiles. Applications to jobs in that field then use it automatically.",
+      "Copies the master resume (or fromId) as a new version for an industry, e.g. 'Data engineering'. Give latex (a complete document you tailored yourself, e.g. from get_resume) to save that, with no AI cost in Job Finder; otherwise, with tailor (default true), Job Finder's LaTeX editor rewrites it (uses the owner's API credits). Either way it's kept only if it compiles. Applications to jobs in that field then use it automatically.",
     group: "write",
     input: z.object({
       industry: z.string().trim().min(1).max(120).describe("The field, e.g. Data engineering, Quant research, Consulting."),
@@ -635,6 +661,7 @@ export const ACTIONS: ActionDef[] = [
       foundId: z.string().max(100).optional().describe("A found job id to aim it at."),
       tailor: z.boolean().optional().describe("Let the LaTeX editor rewrite it for the field (default true)."),
       instructions: z.string().max(3000).optional().describe("Anything the LaTeX editor should do or keep."),
+      latex: z.string().max(500_000).optional().describe("Your own tailored LaTeX, the complete document (\\documentclass … \\end{document})."),
     }),
     explain: async (a) => `Make a ${a.industry} resume version${a.tailor === false ? "" : " and let the LaTeX editor tailor it"}`,
     status: (a) => `Making a ${a.industry} resume version`,
@@ -642,7 +669,17 @@ export const ACTIONS: ActionDef[] = [
       const fromId = a.fromId ?? (await masterResumeId());
       if (!fromId) throw new Error("There's no resume yet. Add one on Profile & resumes first.");
       const title = a.title?.trim() || `Resume – ${a.industry}`;
+      if (a.latex !== undefined && !/\\documentclass[\s\S]*\\end\{document\}/.test(a.latex)) throw new Error("latex must be a complete document, from \\documentclass to \\end{document}.");
+      if (a.latex) {
+        const check = await compileLatex(a.latex);
+        if (!check.ok && !check.notInstalled) throw new Error(`That LaTeX doesn't compile: ${clip(check.error, 300)}`);
+      }
       const { id: resumeId } = unwrap(await createIndustryVersion({ fromId, industry: a.industry, title, targetJobId: a.jobId ?? "" }));
+      if (a.latex) {
+        unwrap(await saveResumeLatex(resumeId, a.latex));
+        await noteActivity({ action: "make_resume_version", title: `Saved the tailored LaTeX for “${title}”`, detail: { resumeId } });
+        return { resumeId, title, industry: a.industry, tailored: true, by: "you (the caller)" };
+      }
       if (a.tailor === false) return { resumeId, title, industry: a.industry, tailored: false };
       const ask = `Make this the ${a.industry} version of my resume${a.jobId || a.foundId ? ", aimed at the target job below" : ""}. ${a.instructions ?? ""} Reply with the complete updated document.`;
       const r = await askSpecialist("latex", ask.trim(), { resumeId, jobId: a.jobId, foundId: a.foundId, industry: a.industry });
@@ -684,6 +721,46 @@ export const ACTIONS: ActionDef[] = [
     status: (a) => `Writing an answer to “${clip(a.question, 60)}”`,
     describe: (a) => `Wrote an answer to “${clip(a.question, 90)}”`,
     run: (a) => writeApplicationAnswer(a),
+  }),
+
+  action({
+    name: "save_cover_letter",
+    title: "Save a cover letter you wrote",
+    description:
+      "Saves a cover letter you wrote yourself for a job (no AI cost in Job Finder). It shows on the Cover letters page, gets a PDF (get_cover_letter_pdf), and Auto apply attaches it when the form asks for one. Plain text, the letter only, in the owner's voice; show it to him before relying on it.",
+    group: "write",
+    input: z.object({
+      ...jobTarget,
+      content: z.string().trim().min(200).max(20_000).describe("The letter, plain text."),
+      notes: z.string().max(4000).optional().describe("Anything the owner should know (what you emphasized, what to check)."),
+    }),
+    explain: async (a) => `Save a cover letter for ${(await jobNames({ foundIds: a.foundId ? [a.foundId] : [], jobIds: a.jobId ? [a.jobId] : [] })) || a.url || "a job"}`,
+    status: () => "Saving a cover letter",
+    run: async (a) => {
+      const match = (await findJobById(a)) ?? (a.url ? await findJobForUrl(a.url) : null);
+      const r = await saveLetterForApplication({ jobId: match?.jobId ?? a.jobId, foundId: match?.foundId ?? a.foundId }, a.content, a.notes);
+      if ("error" in r) throw new Error(r.error);
+      return { id: r.id, jobId: r.jobId };
+    },
+  }),
+  action({
+    name: "save_application_answer",
+    title: "Save an answer you wrote",
+    description:
+      "Saves your answer to one application question for a job (no AI cost in Job Finder), so Auto apply and Fill use it when the form asks that question. Use the question's wording from the form. Answers saved by an AI are held for the owner to read before the application is sent.",
+    group: "write",
+    input: z.object({
+      ...jobTarget,
+      question: z.string().trim().min(3).max(1000).describe("The question as the form words it."),
+      answer: z.string().trim().min(1).max(8000),
+    }),
+    status: (a) => `Saving an answer to “${clip(a.question, 60)}”`,
+    describe: (a) => `Saved an answer to “${clip(a.question, 90)}”`,
+    run: async (a) => {
+      const jobId = await trackedJobId(a);
+      await rememberAnswer(jobId, a.question, a.answer, "ai");
+      return { jobId, saved: true };
+    },
   }),
 
   // --------------------------------------------------------------- apply

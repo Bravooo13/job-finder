@@ -110,7 +110,11 @@ export async function latestCoverLetter(jobId: string | null): Promise<string | 
 
 export async function savedAnswers(jobId: string | null) {
   if (!jobId) return [];
-  return db.select({ question: applyAnswers.question, answer: applyAnswers.answer }).from(applyAnswers).where(eq(applyAnswers.jobId, jobId));
+  return db
+    .select({ question: applyAnswers.question, answer: applyAnswers.answer, source: applyAnswers.source })
+    .from(applyAnswers)
+    .where(eq(applyAnswers.jobId, jobId))
+    .orderBy(desc(applyAnswers.createdAt));
 }
 
 export async function rememberAnswer(jobId: string | null, question: string, answer: string, source: "ai" | "you" | "profile") {

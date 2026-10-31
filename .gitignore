@@ -21,3 +21,6 @@ npm-debug.log*
 # personal context for agents (this repo is public)
 /USER.md
 __pycache__/
+
+# Claude Code project settings with this computer's paths
+/.mcp.json

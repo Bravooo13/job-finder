@@ -68,6 +68,13 @@ Cover letters are written by Auto apply when a form requires one; for a letter
 he wants to read first, use `write_cover_letter`. For a second opinion on fit,
 `ask_agent` with `job-fit`.
 
+If you're working on the owner's Claude plan (Claude Code) and want to spare his
+API credits, write the letter and the answers to the posting's open questions
+yourself and hand them over with `save_cover_letter` and
+`save_application_answer` before queuing; Auto apply uses them (held for his
+OK). A field's resume: `get_resume`, tailor, then `make_resume_version` with
+your `latex`.
+
 ## 4. Queue them (one call)
 
 `auto_apply` with `foundIds`, `jobIds` or `urls`. Keep the `batchId`. The reply

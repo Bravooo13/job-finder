@@ -86,3 +86,49 @@ export async function letterForApplication(ids: { jobId?: string | null; foundId
   await noteActivity({ action: "write_cover_letter", title: `Wrote a cover letter for ${job.title} at ${job.company}`, detail: { coverLetterId: row.id, jobId } });
   return { id: row.id, jobId, content: letter, written: true };
 }
+
+/**
+ * Saves a cover letter someone else wrote (for example Claude Code on your own
+ * Claude plan) for a job, so the Cover letters page, the PDF and Auto apply use it.
+ */
+export async function saveLetterForApplication(
+  ids: { jobId?: string | null; foundId?: string | null },
+  content: string,
+  notes?: string,
+): Promise<LetterResult | { error: string }> {
+  let jobId = ids.jobId ?? null;
+  if (!jobId && ids.foundId) {
+    const saved = await saveFoundJob(ids.foundId);
+    if (!saved.ok) return { error: saved.error };
+    jobId = saved.data.jobId;
+  }
+  if (!jobId) return { error: "Give the job (jobId, foundId or its URL) the letter is for." };
+  const [job] = await db
+    .select({ title: jobs.title, company: companies.name, description: jobs.description })
+    .from(jobs)
+    .innerJoin(companies, eq(jobs.companyId, companies.id))
+    .where(eq(jobs.id, jobId))
+    .limit(1);
+  if (!job) return { error: "That job is gone" };
+  const choice = await resumeChoice({ jobId });
+  const resumeId = choice && choice.kind !== "file" ? choice.resumeId : undefined;
+  const who = currentActor()?.via ?? "an AI";
+  const [row] = await db
+    .insert(coverLetters)
+    .values({
+      title: `${job.company} – ${job.title}`.slice(0, 200),
+      company: job.company,
+      role: job.title,
+      jobId,
+      resumeId: resumeId ?? null,
+      jobDescription: job.description ?? "",
+      instructions: `Written by ${who} and saved to Job Finder.`,
+      content: content.trim(),
+      notes: notes?.trim() || null,
+    })
+    .returning({ id: coverLetters.id });
+  revalidatePath("/cover-letters");
+  revalidatePath(`/jobs/${jobId}`);
+  await noteActivity({ action: "save_cover_letter", title: `Saved a cover letter for ${job.title} at ${job.company}`, detail: { coverLetterId: row.id, jobId } });
+  return { id: row.id, jobId, content: content.trim(), written: true };
+}

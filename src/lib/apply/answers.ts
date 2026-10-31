@@ -65,7 +65,8 @@ export interface AnswerContext {
   jobLocation?: string;
   coverLetter?: string;
   /** Answers you or the AI wrote for this job before, by question. */
-  saved?: { question: string; answer: string }[];
+  /** Answers remembered for this job, newest first; source "ai" = written by an AI. */
+  saved?: { question: string; answer: string; source?: string }[];
   /** You allowed Auto apply to tick consent, acknowledgment and "I certify" boxes for you. */
   consent?: boolean;
   /** Skills from your master resume, for "Which tools have you used?" lists. */
@@ -747,9 +748,11 @@ export function answerFields(fields: FormField[], profile: ApplyProfile, context
     const q = normalizeLabel(`${f.label} ${f.placeholder ?? ""}`.trim());
 
     // Your own saved answers win, matched by wording.
-    const own = [...(ctx.saved ?? []), ...profile.custom].find((c) => sameQuestion(c.question, q));
+    const own: { question: string; answer: string; source?: string } | undefined = [...(ctx.saved ?? []), ...profile.custom].find((c) => sameQuestion(c.question, q));
     if (own && f.type !== "file") {
       const value = isChoice(f) && f.options?.length ? chooseOption(f.options, own.answer) : own.answer;
+      // An answer an AI wrote is used, but held for you to read before it's sent.
+      if (value && own.source === "ai") return { key: f.key, value, confidence: "medium", rule: "saved-ai-answer", note: "Written by AI: read it before it's sent" };
       if (value) return { key: f.key, value, confidence: "high", rule: "saved-answer" };
     }
 

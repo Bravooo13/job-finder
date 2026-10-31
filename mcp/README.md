@@ -39,6 +39,12 @@ Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json
 Replace `YOU` with your Mac user name. Set `JOB_FINDER_URL` if Job Finder runs
 somewhere else.
 
+Opened in the Job-Finder folder, Claude Code also finds the server through a
+local `.mcp.json` and asks once to approve it. Working on your own Claude plan,
+Claude Code can do the writing itself and hand it over with `save_cover_letter`,
+`save_application_answer` and `make_resume_version` (`latex`), so Job Finder's
+API credits are only needed for its own built-in AI.
+
 ## Tools
 
 Run `job_finder_status` first: it says whether the AI, My answers and the
@@ -52,8 +58,9 @@ may do. The main tools:
 | `find_company_boards`, `add_company_board`, `list_searches`, `run_search`, `create_search` | Company boards and saved searches |
 | `save_found_job`, `dismiss_found_job` | Save to My jobs; hide |
 | `ask_agent` | Ask a specialist: resume-tailor, cover-letter, job-fit, interview-prep, outreach, apply-writer, compare, latex |
-| `list_resumes`, `make_resume_version` | Resume versions by industry; make one (the LaTeX editor tailors it) |
-| `write_cover_letter`, `list_cover_letters`, `write_application_answer` | Letters and written answers |
+| `list_resumes`, `get_resume`, `make_resume_version` | Resume versions by industry; read one; make one (give your own `latex`, or let the LaTeX editor tailor it) |
+| `write_cover_letter`, `list_cover_letters`, `write_application_answer` | Letters and written answers by Job Finder's AI (uses the owner's API credits) |
+| `save_cover_letter`, `save_application_answer` | Hand over a letter or an answer you wrote yourself (no API credits); Auto apply uses them |
 | `get_apply_profile`, `update_apply_profile`, `answer_application_fields` | My answers; answers for a form's fields |
 | `auto_apply`, `auto_apply_status`, `auto_apply_action`, `approve_application` | Queue applications, follow them, act on one (approving asks you first by default) |
 | `update_auto_apply_settings` | Auto apply settings (changing submit or consent asks you first by default) |
