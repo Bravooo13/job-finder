@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { findJobById, findJobForUrl } from "@/lib/apply/jobs";
 import { letterForApplication } from "@/lib/apply/letter";
+import { getApplyProfile } from "@/lib/apply/profile";
 import { AiError } from "@/lib/ai/providers";
 import { asRequester } from "@/lib/control/context";
 import { db } from "@/lib/db";
@@ -33,8 +34,16 @@ export async function GET(request: Request) {
   const resume = letter.resumeId
     ? (await db.select().from(resumes).where(eq(resumes.id, letter.resumeId)).limit(1))[0]
     : undefined;
+  // Your contact details from My info win over the resume's (the email you apply with).
+  const me = await getApplyProfile();
   const result = await compileLatex(
-    letterToLatex({ fullName: resume?.fullName, email: resume?.email, phone: resume?.phone, location: resume?.location, content: letter.content }),
+    letterToLatex({
+      fullName: [me.firstName, me.lastName].filter(Boolean).join(" ") || resume?.fullName,
+      email: me.email || resume?.email,
+      phone: me.phone || resume?.phone,
+      location: [me.city, me.state].filter(Boolean).join(", ") || resume?.location,
+      content: letter.content,
+    }),
   );
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.notInstalled ? 409 : 422 });
   const name = `${(resume?.fullName ?? "Cover").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_")}_Cover_Letter.pdf`;

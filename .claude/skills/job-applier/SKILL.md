@@ -92,6 +92,10 @@ not in a tight loop. Then report, grouped by status:
   you or on Apply → Auto apply. Only when he says yes in the conversation for
   that application, use `approve_application` (it may still wait for his OK in
   Job Finder; that's expected).
+- **needs_you** with factual questions (an employer, a city, "will you attend
+  X?"): if the answer is in My info, the resume or something the owner told you,
+  save it once with `save_application_answer` and `everyJob: true`, then `retry`.
+  Otherwise ask him; he can also answer them in Activity → Waiting for you.
 - **needs_you**: show `needs` exactly (a street address, a transcript upload,
   a consent box, a CAPTCHA, a sign-in). The form is usually left open in a tab.
   When the owner has fixed My answers or uploaded the file, `retry`. If the owner

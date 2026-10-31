@@ -98,7 +98,11 @@ const words = (s: string) => normalizeLabel(s).replace(/[^a-z0-9+#. ]/g, " ").sp
 const STOP = new Set(
   "a an and are as at be by can do does for from have how i if in is it me my of on or our please the this to us we what when where which who will with would you your".split(" "),
 );
-const content = (s: string) => new Set(words(s).filter((w) => !STOP.has(w)));
+/** Words that don't change what's asked ("planning", "currently", "please share"). */
+const FILLER = new Set("planning plan currently presently ever still also any there kindly share tell describe provide list indicate select enter".split(" "));
+/** attending → attend, years → year, required → requir: the same word however it's bent. */
+const stem = (w: string) => (w.length > 5 ? w.replace(/(ing|ed|es|s)$/, "") : w.length > 3 ? w.replace(/s$/, "") : w);
+const content = (s: string) => new Set(words(s).filter((w) => !STOP.has(w) && !FILLER.has(w)).map(stem));
 
 /** A saved question matches a form question when they say the same thing, not just share words ("…with Python?" vs "…with SQL?"). */
 function sameQuestion(saved: string, asked: string): boolean {
@@ -107,17 +111,10 @@ function sameQuestion(saved: string, asked: string): boolean {
   if (!A.size || !B.size) return false;
   let shared = 0;
   for (const w of A) if (B.has(w)) shared++;
-  if (shared === A.size) return true; // every word of your question is in theirs
+  // Every word of your question is in theirs (a one-word question must be all of theirs: "School" ≠ "High school name").
+  if (shared === A.size) return A.size >= 2 || B.size === 1;
+  // Nearly every word in common; a swapped word ("…with Python?" vs "…with SQL?") makes it another question.
   return Math.min(A.size, B.size) >= 2 && shared / Math.min(A.size, B.size) >= 0.9;
-}
-
-function overlap(a: string, b: string): number {
-  const A = new Set(words(a));
-  const B = new Set(words(b));
-  if (!A.size || !B.size) return 0;
-  let n = 0;
-  for (const w of A) if (B.has(w)) n++;
-  return n / Math.min(A.size, B.size);
 }
 
 /** Picks the option that means `wanted` ("yes", "no", "decline" or any text). */
@@ -130,18 +127,47 @@ export function chooseOption(options: string[] | undefined, wanted: string): str
   if (w === "decline") return opts.find((o) => DECLINE_RE.test(o)) ?? null;
   const exact = opts.find((o) => o.trim().toLowerCase() === w);
   if (exact) return exact;
-  const contains = opts.find((o) => o.toLowerCase().includes(w) || w.includes(o.trim().toLowerCase()));
+  const contains = containsOption(opts, wanted);
   if (contains) return contains;
   let best: string | null = null;
   let bestScore = 0;
   for (const o of opts) {
-    const s = overlap(o, wanted);
+    const s = distinctOverlap(o, wanted);
     if (s > bestScore) {
       best = o;
       bestScore = s;
     }
   }
-  return bestScore >= 0.5 ? best : null;
+  return bestScore >= 0.6 ? best : null;
+}
+
+/** Words that say nothing about which option it is ("University", "of", "Degree"). */
+const GENERIC = new Set("university college school institute institution of the and degree degrees studies study program in at for".split(" "));
+const flat = (s: string) => s.toLowerCase().replace(/[.'’]/g, "").replace(/[^a-z0-9+#]+/g, " ").trim();
+const distinct = (s: string) => new Set(flat(s).split(" ").filter((x) => x.length > 1 && !GENERIC.has(x) && !STOP.has(x)));
+
+/** Share of the distinctive words two texts have in common, over the longer one ("Applied Data Science" vs "Applied Mathematics" = 1/2). */
+function distinctOverlap(a: string, b: string): number {
+  const A = distinct(a);
+  const B = distinct(b);
+  if (!A.size || !B.size) return 0;
+  let n = 0;
+  for (const x of A) if (B.has(x)) n++;
+  return n / Math.max(A.size, B.size);
+}
+
+/** An option that is the wanted text, ignoring punctuation and case ("M.S." = "MS", "Master’s Degree" = "Masters Degree"). */
+function sameOption(opts: string[], wanted: string): string | null {
+  const w = flat(wanted);
+  return w ? (opts.find((o) => flat(o) === w) ?? null) : null;
+}
+
+/** An option that contains the wanted words in order, or the other way round ("University of Chicago" in "The University of Chicago"). */
+function containsOption(opts: string[], wanted: string): string | null {
+  const w = flat(wanted);
+  if (w.length < 4) return null;
+  const has = (big: string, small: string) => small.length >= 4 && ` ${big} `.includes(` ${small} `);
+  return opts.find((o) => has(flat(o), w)) ?? opts.find((o) => has(w, flat(o)) && distinct(o).size > 0) ?? null;
 }
 
 const isChoice = (f: FormField) => ["select", "radio", "combobox"].includes(f.type) || (f.type === "checkbox" && (f.options?.length ?? 0) > 1);
@@ -318,6 +344,81 @@ const RULES: Rule[] = [
     },
   },
 
+  // ---- questions every form words its own way (before the general rules below)
+  {
+    id: "date-of-birth",
+    test: (q) => /date of birth|birth ?date|\bdob\b|when were you born/.test(q),
+    answer: (p, f) => birthDate(p, f),
+  },
+  {
+    id: "middle-name",
+    test: (q) => /middle (name|initial)/.test(q),
+    answer: (p, _f, q) => (p.middleName ? textAnswer(/initial/.test(q) ? p.middleName[0] : p.middleName) : { value: null, confidence: "high", note: "No middle name" }),
+  },
+  {
+    id: "degree-completion",
+    test: (q) =>
+      /(complete|finish|completion of|receive|obtain|earn|be awarded|be conferred) (your|the|this) (degree|program|studies)|degree (completion|conferral|conferred)|expected (graduation|completion|degree)|when (will|do) you (expect to )?(graduate|finish|complete)|anticipated graduation/.test(q),
+    answer: (p, f) => graduationAnswer(p, f),
+  },
+  {
+    id: "enrolled-program",
+    test: (q, f) =>
+      (isChoice(f) || f.type === "checkbox" || /^(are|is) /.test(q)) &&
+      /\b(currently |presently |now )?(enrolled|pursuing|studying toward|working toward|seeking) (in |a |an |for )?.{0,40}(degree|program|master|bachelor|phd|doctora|graduate|undergraduate|mba)/.test(q),
+    answer: (p, _f, q) => {
+      const grad = ym(p.graduation);
+      const now = new Date();
+      const enrolled = grad ? grad >= now.getFullYear() * 100 + now.getMonth() + 1 : null;
+      if (enrolled === null) return yn("", "low", "Add your graduation date in My info");
+      const level = degreeLevel(p.degree);
+      const asked = /\bmba\b/.test(q) ? "mba" : /master|\bms\b|\bm\.s\b/.test(q) ? "master" : /bachelor|undergrad/.test(q) ? "bachelor" : /phd|doctora/.test(q) ? "phd" : /graduate/.test(q) ? "graduate" : "";
+      if (!asked) return yn(enrolled ? "yes" : "no");
+      const match = asked === "graduate" ? ["master", "phd", "mba"].includes(level) : asked === level;
+      return yn(enrolled && match ? "yes" : "no", level ? "high" : "medium");
+    },
+  },
+  {
+    id: "program-name",
+    test: (q, f) => !isChoice(f) && /(what|which) (graduate |degree |academic )?program|name of (your )?(degree |academic )?program|program of study|current (degree )?program/.test(q),
+    answer: (p) => textAnswer([p.degree && p.major ? `${p.degree} in ${p.major}` : p.degree || p.major, p.school].filter(Boolean).join(", ")),
+  },
+  {
+    id: "residence-country",
+    test: (q) => /country\b.{0,40}\b(reside|resident|live|living|located|residence|based)|\b(reside|live|located|based)\b.{0,40}\bcountry|country of (residence|current residence)/.test(q),
+    answer: (p, f) => pickOrText(f, countryNames(p.country)),
+  },
+  {
+    id: "residence-city",
+    test: (q, f) =>
+      !isChoice(f) &&
+      /\b(city|town)\b.{0,30}\b(reside|live|located|based)\b|\b(reside|live|located|based)\b.{0,40}\b(city|state)\b|what city and state|city ?(and|&|\/) ?state|current (city|residence)|where (do )?you (currently )?(live|reside)/.test(q),
+    answer: (p) => {
+      const c = cityState(p);
+      return c.length ? { value: c[0], confidence: "high", alts: c.slice(1) } : textAnswer("", "low", "Add your city and state in My info");
+    },
+  },
+  {
+    id: "current-employer",
+    test: (q) =>
+      /(current|previous|most recent|recent|present|last)( or (previous|most recent|current|last))? (employer|company|organization)|(employer|company) (you )?(currently |most recently )?work(ed)? (for|at)|who is your (current|previous|most recent) employer/.test(q),
+    answer: (p) => textAnswer(p.currentEmployer, "high", "Add your latest employer in My info"),
+  },
+  {
+    id: "current-title",
+    test: (q) => /(current|previous|most recent|present|last)( or (previous|most recent|current|last))? (job |position |role )?title|title (of|at) your (current|most recent|last) (job|position|role)/.test(q),
+    answer: (p) => textAnswer(p.currentTitle, "high", "Add your latest job title in My info"),
+  },
+  {
+    id: "offer-deadline",
+    test: (q) =>
+      /(offer|recruiting|recruitment|interview|application)[- ](process )?deadlines?|deadlines? (we|that we|i) should (be aware|know)|competing offers?|other (job |internship )?offers?|time[- ]sensitive|timeline (we|that we) should/.test(q),
+    answer: (p, f) => {
+      if (p.offerDeadline) return isChoice(f) && f.options?.length ? pickOrText(f, [p.offerDeadline, /^no\b/i.test(p.offerDeadline) ? "No" : "Yes"]) : textAnswer(p.offerDeadline);
+      return isChoice(f) ? yn("no", "medium", "Usually No: set “Offer deadlines” in My info") : textAnswer("No", "medium", "Usually No: set “Offer deadlines” in My info");
+    },
+  },
+
   // ---- messages and opt-ins (before email/phone and consent: these mention both)
   {
     id: "text-messages",
@@ -459,6 +560,12 @@ const RULES: Rule[] = [
           const pick = chooseOption(f.options, w) ?? chooseOption(f.options, w.split(",")[0]);
           if (pick) return { value: pick, confidence: "high" };
         }
+        // None of your cities is offered: "I'm open to any office" when you'd move, else held for you.
+        const open = f.options.find((o) => /\b(any|all) (of (the|your|our) )?(office|location|city|site)s?\b|open to (any|all|working)|no preference|flexible|anywhere/i.test(o));
+        if (open) {
+          const sure = p.willingToRelocate === "yes";
+          return { value: open, confidence: sure ? "high" : "medium", note: sure ? undefined : `${wanted.join(", ")} isn't offered; set “Willing to relocate” in My info` };
+        }
         return { value: null, confidence: "low", note: `None of the options match ${wanted.join(", ")}` };
       }
       return textAnswer(wanted.join("; "));
@@ -468,6 +575,7 @@ const RULES: Rule[] = [
     id: "work-arrangement",
     test: (q) =>
       !/relocat/.test(q) &&
+      !/\battend(ing)?\b|conference|summit|career fair|\bevent\b|interview/.test(q) &&
       /\b(remote(ly)?|hybrid|on-?site|in[- ]office|in the office|in[- ]person|work arrangement|work(ing)? model|workplace (type|preference)|days (a|per) week in)\b/.test(q),
     answer: (p, f, q) => {
       const pref = p.workArrangement;
@@ -529,7 +637,7 @@ const RULES: Rule[] = [
     answer: (p) => textAnswer([p.city, p.state].filter(Boolean).join(", ")),
   },
   { id: "street", test: (q) => /street|address line 1|^address( 1)?$|mailing address|home address/.test(q), answer: (p) => textAnswer(p.street) },
-  { id: "address2", test: (q) => /address line 2|apt|suite|unit/.test(q), answer: () => ({ value: null, confidence: "high" }) },
+  { id: "address2", test: (q) => /address line 2|\bapt\b|apartment|suite|\bunit\b/.test(q), answer: (p) => (p.street2 ? textAnswer(p.street2) : { value: null, confidence: "high" }) },
   { id: "city", test: (q) => /^city|town/.test(q), answer: (p) => textAnswer(p.city) },
   {
     id: "state",
@@ -537,12 +645,13 @@ const RULES: Rule[] = [
     answer: (p, f) => choiceOrText(f, p.state),
   },
   { id: "zip", test: (q) => /zip|postal/.test(q), answer: (p) => textAnswer(p.zip) },
-  { id: "country", test: (q) => /^country|country of residence|country\/region/.test(q), answer: (p, f) => choiceOrText(f, p.country || "United States") },
+  { id: "country", test: (q) => /^country|country of residence|country\/region/.test(q), answer: (p, f) => pickOrText(f, countryNames(p.country)) },
 
   // ---- education
   {
     id: "school",
-    test: (q) => /(school|university|college|institution)( name)?$|which (school|university)|attending/.test(q) && !/high school/.test(q),
+    test: (q) =>
+      /(school|university|college|institution)( name)?$|which (school|university|college)|(school|university|college) (do|are) you (currently )?attend|attending (school|university|college)/.test(q) && !/high school/.test(q),
     answer: (p, f) => choiceOrText(f, p.school),
   },
   { id: "degree", test: (q) => /degree|level of education|highest education/.test(q), answer: (p, f) => pickOrText(f, degreeAliases(p.degree)) },
@@ -580,17 +689,7 @@ const RULES: Rule[] = [
   {
     id: "graduation",
     test: (q) => /graduat|completion date|class of|expected (end|finish)/.test(q),
-    answer: (p, f) => {
-      if (!p.graduation) return textAnswer("");
-      if (f.type === "month") return { value: p.graduation.slice(0, 7), confidence: "high" };
-      if (f.type === "date") return { value: `${p.graduation.slice(0, 7)}-15`, confidence: "medium" };
-      if (isChoice(f) && f.options?.length) {
-        const year = p.graduation.slice(0, 4);
-        return { value: chooseOption(f.options, monthYear(p.graduation)) ?? chooseOption(f.options, year), confidence: "medium" };
-      }
-      if (/\byear\b/.test(normalizeLabel(f.label)) && !/month/.test(normalizeLabel(f.label))) return { value: p.graduation.slice(0, 4), confidence: "high" };
-      return textAnswer(monthYear(p.graduation));
-    },
+    answer: (p, f) => graduationAnswer(p, f),
   },
 
   // ---- availability, pay, misc
@@ -698,26 +797,91 @@ const RULES: Rule[] = [
 
 function choiceOrText(f: FormField, value: string, confidence: Confidence = "high"): Omit<FieldAnswer, "key" | "rule"> {
   if (!value) return { value: null, confidence: "low", note: "Add this to My answers" };
-  if (isChoice(f) && f.options?.length) {
-    const pick = chooseOption(f.options, value);
-    return pick ? { value: pick, confidence } : { value: null, confidence: "low", note: `No option matches “${value}”` };
-  }
+  if (isChoice(f) && f.options?.length) return pickOrText(f, [value], confidence);
   // A type-to-search dropdown: the browser checks that an option really matches.
   return { value, confidence: isChoice(f) && f.type !== "combobox" ? "medium" : confidence };
 }
 
 /** The first of several wordings that a dropdown offers; for type-to-search dropdowns, the rest become fallbacks. */
+/**
+ * The option for the first candidate that is really there: the same words first
+ * ("Master's Degree"), then an option that contains them, and only then a close
+ * guess, which is held for you to check. A type-to-search dropdown (a school,
+ * a discipline) shows only part of its list, so the answer is typed to search.
+ */
 function pickOrText(f: FormField, candidates: string[], confidence: Confidence = "high"): Omit<FieldAnswer, "key" | "rule"> {
-  const c = candidates.map((x) => x.trim()).filter(Boolean);
+  const c = [...new Set(candidates.map((x) => x.trim()).filter(Boolean))];
   if (!c.length) return { value: null, confidence: "low", note: "Add this to My answers" };
   if (isChoice(f) && f.options?.length) {
+    const opts = f.options.filter((o) => o.trim() && !/^(select|choose|please select|--)/i.test(o.trim()));
     for (const x of c) {
-      const pick = chooseOption(f.options, x);
+      const pick = sameOption(opts, x);
       if (pick) return { value: pick, confidence };
+    }
+    for (const x of c) {
+      const pick = containsOption(opts, x);
+      if (pick) return { value: pick, confidence };
+    }
+    if (f.type === "combobox") return { value: c[0], confidence, alts: c.length > 1 ? c.slice(1) : undefined };
+    for (const x of c) {
+      const pick = chooseOption(opts, x);
+      if (pick) return { value: pick, confidence: "medium", note: `Closest option to “${x}”: check it` };
     }
     return { value: null, confidence: "low", note: `No option matches “${c[0]}”` };
   }
   return { value: c[0], confidence, alts: c.length > 1 ? c.slice(1) : undefined };
+}
+
+/** Your graduation date in the form's format (month field, date, a list of terms, or text like "May 2028"). */
+function graduationAnswer(p: ApplyProfile, f: FormField): Omit<FieldAnswer, "key" | "rule"> {
+  if (!p.graduation) return textAnswer("", "low", "Add your graduation date in My info");
+  if (f.type === "month") return { value: p.graduation.slice(0, 7), confidence: "high" };
+  if (f.type === "date") return { value: `${p.graduation.slice(0, 7)}-15`, confidence: "medium" };
+  if (isChoice(f) && f.options?.length) {
+    const year = p.graduation.slice(0, 4);
+    return { value: chooseOption(f.options, monthYear(p.graduation)) ?? chooseOption(f.options, year), confidence: "medium" };
+  }
+  if (/\byear\b/.test(normalizeLabel(f.label)) && !/month/.test(normalizeLabel(f.label))) return { value: p.graduation.slice(0, 4), confidence: "high" };
+  return textAnswer(monthYear(p.graduation));
+}
+
+/** "M.S." → "master", "B.A. in Economics" → "bachelor". */
+function degreeLevel(d: string): "master" | "bachelor" | "phd" | "mba" | "" {
+  const s = d.toLowerCase().replace(/[.'’]/g, "");
+  if (/^mba\b|business administration/.test(s)) return "mba";
+  if (/^(ms|msc|mse|meng|ma|mfa|mph|mpp|mps|mcs|master)/.test(s)) return "master";
+  if (/^(ba|ab|bs|bsc|bse|beng|bba|bachelor)/.test(s)) return "bachelor";
+  if (/^(phd|dphil|doctor)/.test(s)) return "phd";
+  return "";
+}
+
+const STATE_CODES: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO", connecticut: "CT", delaware: "DE",
+  "district of columbia": "DC", florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA",
+  kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN",
+  mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ",
+  "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR",
+  pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT",
+  vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI", wyoming: "WY",
+};
+
+/** "Chicago, Illinois" and the other ways to write it ("Chicago, IL"). */
+function cityState(p: ApplyProfile): string[] {
+  if (!p.city) return [];
+  const code = STATE_CODES[p.state.trim().toLowerCase()] ?? (p.state.trim().length === 2 ? p.state.trim().toUpperCase() : "");
+  const full = Object.entries(STATE_CODES).find(([, c]) => c === code)?.[0]?.replace(/\b\w/g, (x) => x.toUpperCase()) ?? p.state;
+  return [...new Set([code ? `${p.city}, ${code}` : "", full ? `${p.city}, ${full}` : "", p.city].filter(Boolean))];
+}
+
+const US = /^(us|usa|u\.s\.a?\.?|united states( of america)?|america)$/i;
+const countryNames = (c: string) => (US.test(c.trim()) || !c.trim() ? ["United States", "United States of America", "USA", "US"] : [c]);
+
+/** A date of birth in the form's format: a date field, or MM/DD/YYYY text. */
+function birthDate(p: ApplyProfile, f: FormField): Omit<FieldAnswer, "key" | "rule"> {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.dateOfBirth);
+  if (!m) return { value: null, confidence: "low", note: "Add your date of birth in My info if you want forms to get it" };
+  if (f.type === "date") return { value: p.dateOfBirth, confidence: "high" };
+  return { value: `${m[2]}/${m[3]}/${m[1]}`, confidence: "high", alts: [p.dateOfBirth] };
 }
 
 /** A standard declaration ("related to an employee?"): your saved answer, else "No" held for you to check. */

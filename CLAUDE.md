@@ -459,6 +459,10 @@ writing yourself and hand it over instead:
 - Open questions: before queuing, write answers to the questions the posting
   asks and `save_application_answer` for each (question worded as on the form).
   Auto apply uses them, held for his OK because an AI wrote them.
+- A form stopped on a fact (an employer, a city, "attending NeurIPS?"): if he
+  told you or it's in My info / the resume, `save_application_answer` with
+  `everyJob: true` (it goes into My info for every form), then
+  `auto_apply_action` retry. Never invent facts.
 - Finding, saving, queuing and checking (`search_found_jobs`, `auto_apply`,
   `auto_apply_status`…) cost nothing either way.
 
@@ -569,6 +573,22 @@ widths and look for console errors. Extension scripts should pass
   `update_auto_apply_settings`, `create_search`, `approve_application`,
   `list_waiting`, `list_activity`. Migration 0006; e2e test
   `tests/e2e/control_e2e.py`.
+- **My info** page (`/me`, also linked from Settings): every fact forms ask
+  (contact, address, date of birth, education, current employer and title,
+  work authorization, locations, offer deadlines, your own Q&A). The answer
+  engine now reads Stripe's real Greenhouse questions correctly: long
+  type-to-search lists (school, discipline) are typed, not guessed; "M.S." picks
+  "Master's Degree" (no look-alike guesses: options must match, or the guess is
+  held); enrollment ("currently enrolled in a Master's program?"), degree
+  completion dates, country and city of residence, current employer and title,
+  "open to any office", offer deadlines, date of birth, program name; "attending
+  NeurIPS in person" is no longer a work-arrangement question. Saved questions
+  match other wordings (word endings and filler words ignored, never a swapped
+  key word). Questions a form stopped on can be answered once in Activity →
+  Waiting for you ("Save and try again", stored in My info for every form);
+  `save_application_answer` with `everyJob` does the same for an AI (facts
+  only). Cover letter and resume PDFs sent with applications use My info's
+  email, phone and city.
 - Hand-over actions for an AI on its own plan (Claude Code): `get_resume`,
   `make_resume_version` with `latex`, `save_cover_letter`,
   `save_application_answer`. Answers an AI saved are used by Fill and Auto

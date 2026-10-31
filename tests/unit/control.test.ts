@@ -146,5 +146,25 @@ test("an outside AI can hand Job Finder its own writing", async () => {
   assert.equal(out.status, "invalid");
 });
 
+test("the resume you send uses the email and phone in My info", async () => {
+  const { withMyContact } = await import("@/lib/apply/jobs");
+  const tex = String.raw`\href{mailto:old@example.com}{old@example.com} \,$\cdot$\, 555-0100 \,$\cdot$\, Oldtown, Maine`;
+  const out = withMyContact(tex, { email: "old@example.com", phone: "555-0100", location: "Oldtown, Maine" }, { email: "new@school.edu", phone: "555-0199", city: "Chicago", state: "Illinois" });
+  assert.equal(out, String.raw`\href{mailto:new@school.edu}{new@school.edu} \,$\cdot$\, 555-0199 \,$\cdot$\, Chicago, Illinois`);
+  assert.equal(withMyContact(tex, { email: "old@example.com", phone: null, location: null }, { email: "", phone: "", city: "", state: "" }), tex);
+});
+
+test("an answer saved for every application is reused for the same question in other words", async () => {
+  const { rememberGlobalAnswer, getApplyProfile } = await import("@/lib/apply/profile");
+  const { answerFields } = await import("@/lib/apply/answers");
+  await rememberGlobalAnswer("Are you planning on attending NeurIPS in person this year?*", "No");
+  await rememberGlobalAnswer("Are you planning on attending NeurIPS in person this year?", "No");
+  const me = await getApplyProfile();
+  assert.equal(me.custom.filter((c) => /neurips/i.test(c.question)).length, 1, "saved once");
+  const [a] = answerFields([{ key: "n", label: "Will you attend NeurIPS this year in person?", type: "select", options: ["Yes", "No"] }], me);
+  assert.equal(a.value, "No");
+  assert.equal(a.confidence, "high");
+});
+
 // The search scheduler keeps an interval alive once its module is loaded.
 after(() => setTimeout(() => process.exit(), 50).unref());

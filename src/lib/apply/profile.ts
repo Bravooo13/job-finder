@@ -24,6 +24,10 @@ async function defaultsFromResume(): Promise<Partial<ApplyProfile>> {
     .filter((e) => e.section === "education")
     .sort((a, b) => (b.endDate ?? b.startDate ?? "").localeCompare(a.endDate ?? a.startDate ?? ""));
   const [current, previous] = schools;
+  // The latest job: one you're still in, else the one that ended last.
+  const [job] = education
+    .filter((e) => e.section === "experience")
+    .sort((a, b) => Number(b.current) - Number(a.current) || (b.endDate ?? b.startDate ?? "").localeCompare(a.endDate ?? a.startDate ?? ""));
   const degreeOf = (title?: string | null) => (title ?? "").split(/,| in /i)[0]?.trim() ?? "";
   const majorOf = (title?: string | null) => /\bin\s+([^,(]+)/i.exec(title ?? "")?.[1]?.trim() ?? "";
   const gpa = /gpa[^0-9]{0,15}([0-4]\.\d{1,2})/i.exec(`${current?.description ?? ""} ${previous?.description ?? ""}`)?.[1] ?? "";
@@ -49,6 +53,8 @@ async function defaultsFromResume(): Promise<Partial<ApplyProfile>> {
     previousMajor: majorOf(previous?.title),
     previousStart: previous?.startDate ?? "",
     previousGraduation: previous?.endDate ?? "",
+    currentEmployer: job?.organization ?? "",
+    currentTitle: job?.title ?? "",
     over18: "yes",
     hearAbout: "LinkedIn",
   };
@@ -104,4 +110,21 @@ export async function saveApplyProfile(input: unknown): Promise<ApplyProfile> {
   if (changed.length)
     await noteActivity({ action: "update_apply_profile", title: `Changed My answers: ${changed.slice(0, 6).join(", ")}${changed.length > 6 ? ` and ${changed.length - 6} more` : ""}`, detail: { fields: changed } });
   return getApplyProfile();
+}
+
+/**
+ * Remembers an answer for every application that asks this question (My info →
+ * Your own questions). A question already there with the same wording is updated.
+ */
+export async function rememberGlobalAnswer(question: string, answer: string): Promise<void> {
+  const q = question.replace(/\s+/g, " ").replace(/[*✱]\s*$/, "").replace(/…$/, "").trim().slice(0, 500);
+  const a = answer.trim().slice(0, 4000);
+  if (!q || !a) return;
+  const saved = await getSavedApplyProfile();
+  const custom = [...(saved.custom ?? [])];
+  const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const i = custom.findIndex((c) => key(c.question) === key(q));
+  if (i >= 0) custom[i] = { question: custom[i].question, answer: a };
+  else custom.push({ question: q, answer: a });
+  await saveApplyProfile({ custom: custom.slice(-100) });
 }

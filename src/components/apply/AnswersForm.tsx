@@ -177,12 +177,14 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           {field("firstName", "First name")}
+          {field("middleName", "Middle name", { placeholder: "Optional" })}
           {field("lastName", "Last name")}
           {field("preferredName", "Preferred name")}
           {field("pronouns", "Pronouns", { placeholder: "Optional" })}
           {field("email", "Email", { type: "email" })}
           {field("phone", "Phone", { type: "tel" })}
           {field("street", "Street address", { hint: "Only used when a form asks for it" })}
+          {field("street2", "Apartment, suite or unit", { placeholder: "Optional" })}
           {field("city", "City")}
           {field("state", "State")}
           {field("zip", "ZIP code")}
@@ -190,6 +192,18 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
           {field("linkedin", "LinkedIn URL")}
           {field("github", "GitHub URL")}
           {field("website", "Website or portfolio")}
+          {field("dateOfBirth", "Date of birth", { type: "date", hint: "Optional. Only used when a form asks for it." })}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Work</CardTitle>
+          <CardDescription>For “Who is your current or previous employer?” and “What is your job title?”. Filled in from your resume&apos;s latest job until you change them.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          {field("currentEmployer", "Current or most recent employer")}
+          {field("currentTitle", "Job title there")}
         </CardContent>
       </Card>
 
@@ -283,6 +297,10 @@ export function AnswersForm({ initial }: { initial: ApplyProfile }) {
             value={p.textMessages}
             onChange={(v) => set("textMessages", v)}
           />
+          {field("offerDeadline", "Offer deadlines", {
+            placeholder: "No",
+            hint: "For “Do you have an offer or recruiting deadline we should know about?”. Leave blank and forms get “No”, held for you to check.",
+          })}
         </CardContent>
       </Card>
 

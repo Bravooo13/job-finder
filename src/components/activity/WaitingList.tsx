@@ -6,7 +6,8 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { approveHeldApplication, decideAiRequest } from "@/lib/control/server-actions";
+import { Input } from "@/components/ui/input";
+import { answerAndRetry, approveHeldApplication, decideAiRequest } from "@/lib/control/server-actions";
 import type { Actor } from "@/lib/control/shared";
 import { timeAgo } from "@/lib/utils";
 import { ActorBadge } from "./ActorBadge";
@@ -77,6 +78,48 @@ function RequestItem({ r, onDone }: { r: WaitingRequest; onDone: () => void }) {
   );
 }
 
+/** Things only you can do on the page itself (not a question to answer once). */
+const ON_THE_PAGE = /^(tick|attach|sign in|find the|the company's application link)|robot|captcha|verify|upload/i;
+
+/** Questions the application stopped on: answer each once, saved in My info for every form that asks it. */
+function AnswerOnce({ t, onDone }: { t: WaitingTask; onDone: () => void }) {
+  const questions = t.needs.filter((n) => !ON_THE_PAGE.test(n));
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [pending, start] = useTransition();
+  if (!questions.length) return null;
+  const given = questions.filter((q) => values[q]?.trim());
+  return (
+    <div className="grid gap-2 rounded-md bg-muted/50 p-3">
+      <p className="text-xs font-medium">Answer once. Saved in My info and used for every application that asks the same thing.</p>
+      {questions.map((q) => (
+        <label key={q} className="grid gap-1 text-xs">
+          <span>{q}</span>
+          <Input value={values[q] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [q]: e.target.value }))} placeholder="Your answer" className="h-8 text-sm" />
+        </label>
+      ))}
+      <div>
+        <Button
+          size="sm"
+          disabled={pending || !given.length}
+          onClick={() =>
+            start(async () => {
+              const r = await answerAndRetry(
+                t.id,
+                given.map((q) => ({ question: q, answer: values[q] })),
+              );
+              if (!r.ok) return void toast.error(r.error);
+              toast.success(`Saved ${r.data} answer${r.data === 1 ? "" : "s"}. Trying the application again.`);
+              onDone();
+            })
+          }
+        >
+          {pending ? <Loader2 className="animate-spin" /> : <Check />} Save and try again
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function TaskItem({ t, onDone }: { t: WaitingTask; onDone: () => void }) {
   const [pending, start] = useTransition();
   return (
@@ -136,6 +179,7 @@ function TaskItem({ t, onDone }: { t: WaitingTask; onDone: () => void }) {
           {t.checks.length > 6 ? <li className="text-muted-foreground">…and {t.checks.length - 6} more on the Auto apply tab</li> : null}
         </ul>
       ) : null}
+      {t.status === "needs_you" ? <AnswerOnce t={t} onDone={onDone} /> : null}
     </li>
   );
 }
@@ -161,7 +205,7 @@ export function WaitingList({ requests: initialRequests, tasks: initialTasks }: 
           <h3 className="text-sm font-medium">Applications ({tasks.length})</h3>
           <ul className="grid gap-2">
             {tasks.map((t) => (
-              <TaskItem key={t.id} t={t} onDone={() => setTasks((all) => all.filter((x) => x.id !== t.id || x.status !== "held"))} />
+              <TaskItem key={t.id} t={t} onDone={() => setTasks((all) => all.filter((x) => x.id !== t.id))} />
             ))}
           </ul>
         </section>

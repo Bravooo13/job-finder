@@ -9,12 +9,14 @@ const text = (max = 300) => z.string().trim().max(max).default("");
 export const applyProfileSchema = z.object({
   // Contact
   firstName: text(100),
+  middleName: text(100),
   lastName: text(100),
   preferredName: text(100),
   pronouns: text(50),
   email: text(200),
   phone: text(50),
   street: text(200),
+  street2: text(100), // apartment, suite, unit
   city: text(100),
   state: text(100),
   zip: text(20),
@@ -22,6 +24,7 @@ export const applyProfileSchema = z.object({
   linkedin: text(300),
   github: text(300),
   website: text(300),
+  dateOfBirth: text(20), // YYYY-MM-DD; only used when a form asks
 
   // Education (the school you're at now, or finished most recently)
   school: text(200),
@@ -35,6 +38,10 @@ export const applyProfileSchema = z.object({
   previousMajor: text(200),
   previousStart: text(20),
   previousGraduation: text(20),
+
+  // Work (filled in from the latest job on your resume)
+  currentEmployer: text(200), // "Who is your current or previous employer?"
+  currentTitle: text(200), // "What is your current or previous job title?"
 
   // Work authorization
   authorizedToWork: yesNo, // "Are you legally authorized to work in the US?"
@@ -75,6 +82,7 @@ export const applyProfileSchema = z.object({
   restrictiveAgreement: yesNo, // non-compete, non-solicitation, post-employment covenants
   clientRelationship: yesNo, // "Have you worked for or with one of our clients?"
   textMessages: yesNo, // agree to text/WhatsApp updates (not set = no)
+  offerDeadline: text(500), // "Do you have an offer or recruiting deadline?" (empty = "No", held to check)
 
   // Your own questions and answers, matched by wording.
   custom: z

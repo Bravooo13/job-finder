@@ -25,7 +25,8 @@ export function decideSubmit(
   const needs = [...(opts.blockers ?? [])];
   for (const f of fields) {
     if (!f.required || f.filled) continue;
-    const label = short(f.label) || "A required field";
+    // The whole question, so you (or an AI) can answer it once and have it reused.
+    const label = short(f.label, 290) || "A required field";
     needs.push(f.consent ? `Tick: ${label}` : f.type === "file" ? `Attach: ${label}` : label);
   }
   const checks = fields

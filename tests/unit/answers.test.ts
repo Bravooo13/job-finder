@@ -220,3 +220,82 @@ test("location, travel, race wording and lists", () => {
   const langs = answerFields([{ key: "l", label: "Language Fluency*", type: "combobox", multiple: true }], { ...p, languages: "English; Chinese (Mandarin)" })[0];
   assert.deepEqual(langs.value, ["English", "Chinese (Mandarin)"]);
 });
+
+// The questions Stripe's internship form asked (Greenhouse, October 2026), with its real options.
+test("a real form's wordings: education rows, enrollment, residence, employer, office, events", () => {
+  const me = applyProfileSchema.parse({
+    ...p,
+    degree: "M.S.",
+    schoolStart: "2026-09",
+    previousSchool: "A Small College",
+    previousDegree: "B.A. in Economics",
+    previousStart: "2022-09",
+    previousGraduation: "2026-05",
+    currentEmployer: "Example Analytics",
+    currentTitle: "Data Analyst Intern",
+    willingToRelocate: "",
+    workArrangement: "any",
+    preferredLocations: "Chicago, IL",
+    city: "Chicago",
+    state: "Illinois",
+  });
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const degrees = ["High School", "Associate's Degree", "Bachelor's Degree", "Master's Degree", "Master of Business Administration (M.B.A.)", "Juris Doctor (J.D.)", "Doctor of Medicine (M.D.)", "Doctor of Philosophy (Ph.D.)", "Engineer's Degree", "Other"];
+  const fields = [
+    // The school and discipline lists are long and only partly shown until you type.
+    { key: "school", label: "School*", type: "combobox", hint: "school--0", options: ["Aalborg University", "Aalto University", "Aarhus University"] },
+    { key: "degree", label: "Degree*", type: "combobox", hint: "degree--0", options: degrees },
+    { key: "discipline", label: "Discipline*", type: "combobox", hint: "discipline--0", options: ["Accounting", "Applied Mathematics", "Architecture"] },
+    { key: "startMonth", label: "Start date month*", type: "combobox", hint: "start-month--0", options: months },
+    { key: "school1", label: "School", type: "combobox", hint: "school--1", options: [] },
+    { key: "degree1", label: "Degree", type: "combobox", hint: "degree--1", options: degrees },
+    { key: "enrolled", label: "Are you currently enrolled in a Master's degree program?*", type: "combobox", options: ["Yes", "No"] },
+    { key: "bachelors", label: "Are you currently pursuing a Bachelor's degree?", type: "radio", options: ["Yes", "No"] },
+    { key: "complete", label: "When do you expect to complete your degree?*", type: "text" },
+    { key: "employer", label: "Who is your current or previous employer?*", type: "text" },
+    { key: "title", label: "What is your current or previous job title?*", type: "text" },
+    { key: "country", label: "Please select the country where you currently reside. *", type: "combobox", options: ["Canada", "India", "United Kingdom", "United States"] },
+    { key: "city", label: "If located in the US, in what city and state do you reside?*", type: "text" },
+    { key: "office", label: "Office location preference:*", type: "combobox", options: ["San Francisco, CA, United States", "Seattle, WA, United States", "New York, NY, United States", "I am open to working in any office"] },
+    { key: "neurips", label: "Are you planning on attending NeurIPS in person this year?*", type: "combobox", options: ["Yes", "No"] },
+    { key: "deadline", label: "Do you have an active offer deadline or another recruiting-process deadline we should be aware of? If yes, please share the deadline date and any relevant context.", type: "textarea" },
+    { key: "program", label: "What graduate program are you in?", type: "text" },
+    { key: "phoneCountry", label: "Country*", type: "combobox", hint: "country", options: ["Canada +1", "United States +1"] },
+  ] as { key: string; label: string; type: FieldType; hint?: string; options?: string[] }[];
+  const a = Object.fromEntries(answerFields(fields, me, { educationRows: [0, 1] }).map((x) => [x.key, x]));
+  // Long lists: typed to search, never a wrong look-alike ("Aalborg University", "Applied Mathematics").
+  assert.equal(a.school.value, "University of Chicago");
+  assert.equal(a.discipline.value, "Applied Data Science");
+  assert.deepEqual(a.discipline.alts, ["Data Science"]);
+  // M.S. is "Master's Degree", not "Master of Business Administration".
+  assert.equal(a.degree.value, "Master's Degree");
+  assert.equal(a.degree1.value, "Bachelor's Degree");
+  assert.equal(a.school1.value, "A Small College");
+  assert.equal(a.startMonth.value, "September");
+  assert.equal(a.enrolled.value, "Yes");
+  assert.equal(a.bachelors.value, "No");
+  assert.equal(a.complete.value, "May 2028");
+  assert.equal(a.employer.value, "Example Analytics");
+  assert.equal(a.title.value, "Data Analyst Intern");
+  assert.equal(a.country.value, "United States");
+  assert.equal(a.city.value, "Chicago, IL");
+  assert.equal(a.office.value, "I am open to working in any office");
+  assert.equal(a.office.confidence, "medium", "Chicago isn't offered and relocation isn't set: held to check");
+  assert.equal(a.neurips.value, null, "attending a conference is not a work-arrangement question");
+  assert.equal(a.deadline.value, "No");
+  assert.equal(a.deadline.confidence, "medium");
+  assert.equal(a.program.value, "M.S. in Applied Data Science, University of Chicago");
+  assert.equal(a.phoneCountry.value, "United States +1");
+});
+
+test("the same question in other words gets the same answer", () => {
+  const me = applyProfileSchema.parse({ ...p, dateOfBirth: "2003-04-05", currentEmployer: "Example Analytics", currentTitle: "Analyst" });
+  const ask = (label: string, type: FieldType = "text", options?: string[]) => answerFields([{ key: "k", label, type, options }], me)[0];
+  for (const l of ["Expected graduation date", "When will you graduate?", "Anticipated graduation", "When do you expect to finish your degree?"]) assert.equal(ask(l).value, "May 2028", l);
+  for (const l of ["Current employer", "Most recent employer", "Who is your current or previous employer?"]) assert.equal(ask(l).value, "Example Analytics", l);
+  for (const l of ["What country do you currently live in?", "Country of residence"]) assert.equal(ask(l, "select", ["Canada", "United States of America"]).value, "United States of America", l);
+  for (const l of ["What city and state do you live in?", "Where do you currently reside?", "City/State"]) assert.equal(ask(l).value, "Chicago, IL", l);
+  assert.equal(ask("Date of birth", "date").value, "2003-04-05");
+  assert.equal(ask("Date of Birth (MM/DD/YYYY)").value, "04/05/2003");
+  assert.equal(ask("Are you open to working in person in our Chicago office?", "radio", ["Yes", "No"]).value, "Yes");
+});

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { actOnTask } from "@/lib/apply/auto";
+import { rememberGlobalAnswer } from "@/lib/apply/profile";
 import { noteActivity } from "./log";
 import { decideRequest } from "./run";
 import { saveControlSettings } from "./settings";
@@ -47,4 +48,17 @@ export async function approveHeldApplication(id: string): Promise<ActionResult> 
   const task = await actOnTask(id, "approve");
   refresh();
   return task ? { ok: true, data: null } : { ok: false, error: "That application is gone" };
+}
+
+/**
+ * Your answers to the questions an application stopped on: saved in My info for
+ * every application that asks the same thing, then the application tries again.
+ */
+export async function answerAndRetry(taskId: string, answers: { question: string; answer: string }[]): Promise<ActionResult<number>> {
+  const given = answers.filter((a) => a.question.trim() && a.answer.trim());
+  for (const a of given) await rememberGlobalAnswer(a.question, a.answer);
+  const task = await actOnTask(taskId, "retry");
+  refresh();
+  revalidatePath("/me");
+  return task ? { ok: true, data: given.length } : { ok: false, error: "That application is gone" };
 }

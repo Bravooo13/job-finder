@@ -7,6 +7,7 @@ import { applyAnswers, companies, coverLetters, discoveredJobs, jobs, resumes } 
 import { compileLatex } from "@/lib/latex/tectonic";
 import { updateJobStatus } from "@/lib/jobs/actions";
 import { saveFoundJob } from "@/lib/search/actions";
+import { getApplyProfile } from "./profile";
 
 /** "…/jobs/123/apply", "…/uuid/application" and the posting itself are the same job. */
 export function postingKey(url: string): string {
@@ -150,16 +151,39 @@ export async function resumeForJob(jobId: string | null): Promise<{ id: string; 
   return master.find((r) => r.latex?.trim()) ?? master[0] ?? null;
 }
 
+/**
+ * The resume you send uses the contact details in My info (the email and phone
+ * you apply with), even when the resume itself still has older ones.
+ */
+export function withMyContact(
+  latex: string,
+  resume: { email: string | null; phone: string | null; location: string | null },
+  me: { email: string; phone: string; city: string; state: string },
+): string {
+  const swap = (from: string | null, to: string) => (from?.trim() && to.trim() && from.trim() !== to.trim() ? [from.trim(), to.trim()] : null);
+  const pairs = [swap(resume.email, me.email), swap(resume.phone, me.phone), swap(resume.location, [me.city, me.state].filter(Boolean).join(", "))].filter(
+    (x): x is string[] => x !== null,
+  );
+  let out = latex;
+  for (const [from, to] of pairs) out = out.split(from).join(to.replace(/[&%$#_{}]/g, (c) => `\\${c}`));
+  return out;
+}
+
 export async function resumePdf(resumeId: string): Promise<{ pdf: Buffer; fileName: string } | { error: string }> {
-  const row = await db.select({ latex: resumes.latex, fullName: resumes.fullName, title: resumes.title }).from(resumes).where(eq(resumes.id, resumeId)).limit(1);
+  const row = await db
+    .select({ latex: resumes.latex, fullName: resumes.fullName, title: resumes.title, email: resumes.email, phone: resumes.phone, location: resumes.location })
+    .from(resumes)
+    .where(eq(resumes.id, resumeId))
+    .limit(1);
   const r = row[0];
   if (!r) return { error: "Resume not found" };
   if (!r.latex?.trim()) return { error: "This resume has no LaTeX version yet. Open it in Job Finder and use the LaTeX & PDF tab." };
-  const hash = createHash("sha256").update(r.latex).digest("hex");
+  const latex = withMyContact(r.latex, r, await getApplyProfile());
+  const hash = createHash("sha256").update(latex).digest("hex");
   const fileName = `${(r.fullName || r.title).replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "Resume"}_Resume.pdf`;
   const cached = pdfCache.get(hash);
   if (cached) return { pdf: cached, fileName };
-  const result = await compileLatex(r.latex);
+  const result = await compileLatex(latex);
   if (!result.ok) return { error: `The resume didn't compile: ${result.error}` };
   pdfCache.set(hash, result.pdf);
   if (pdfCache.size > 20) pdfCache.delete(pdfCache.keys().next().value!);

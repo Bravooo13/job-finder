@@ -11,7 +11,7 @@ import { SUBMIT_MODES, TASK_STATUSES, type TaskStatus } from "@/lib/apply/auto-s
 import { fillAnswers, fillSchema } from "@/lib/apply/fill";
 import { findJobById, findJobForUrl, markAppliedByUrl, rememberAnswer } from "@/lib/apply/jobs";
 import { letterForApplication, saveLetterForApplication } from "@/lib/apply/letter";
-import { getApplyProfile, saveApplyProfile } from "@/lib/apply/profile";
+import { getApplyProfile, rememberGlobalAnswer, saveApplyProfile } from "@/lib/apply/profile";
 import { applyQueue } from "@/lib/apply/queue";
 import { writeAnswerSchema, writeApplicationAnswer } from "@/lib/apply/write-answer";
 import { findBoards, verifyBoard } from "@/lib/boards/detect";
@@ -747,16 +747,21 @@ export const ACTIONS: ActionDef[] = [
     name: "save_application_answer",
     title: "Save an answer you wrote",
     description:
-      "Saves your answer to one application question for a job (no AI cost in Job Finder), so Auto apply and Fill use it when the form asks that question. Use the question's wording from the form. Answers saved by an AI are held for the owner to read before the application is sent.",
-    group: "write",
+      "Saves your answer to an application question (no AI cost in Job Finder), so Auto apply and Fill use it when a form asks it. For one job, give the job; answers an AI saved for a job are held for the owner to read before it's sent. With everyJob: true it goes into the owner's My info (Your own questions) and is reused by every form that asks the same thing in other words: use that only for facts he told you or that are in My info and his resume, never for opinions or essays.",
+    group: (a) => (a.everyJob ? "settings" : "write"),
     input: z.object({
       ...jobTarget,
       question: z.string().trim().min(3).max(1000).describe("The question as the form words it."),
       answer: z.string().trim().min(1).max(8000),
+      everyJob: z.boolean().optional().describe("Save it in My info for every application (facts only)."),
     }),
     status: (a) => `Saving an answer to “${clip(a.question, 60)}”`,
     describe: (a) => `Saved an answer to “${clip(a.question, 90)}”`,
     run: async (a) => {
+      if (a.everyJob) {
+        await rememberGlobalAnswer(a.question, a.answer);
+        return { savedFor: "every application (My info)" };
+      }
       const jobId = await trackedJobId(a);
       await rememberAnswer(jobId, a.question, a.answer, "ai");
       return { jobId, saved: true };
