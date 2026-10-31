@@ -219,6 +219,11 @@
   async function pickOption(el, opt) {
     opt.scrollIntoView({ block: "nearest" });
     const before = selectedText(el);
+    // Already the choice (a phone country shown as "+1" for "United States+1"): nothing to change.
+    if (before && norm(textOf(opt)).includes(norm(before)) && norm(before).length >= 2 && !isMulti(el)) {
+      await closeCombo(el);
+      return true;
+    }
     // React Select picks on click; others on a mouse press or Enter.
     opt.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
     opt.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
@@ -237,7 +242,8 @@
     for (const f of fields) {
       if (f.type !== "combobox" || f.options?.length) continue;
       // Type-to-search lists (cities, schools) show nothing until you type.
-      if (/\b(location|city|school|university|college|institution|employer|company)\b/i.test(f.label)) continue;
+      // ("Office location preference" is a plain list, so "location" alone doesn't skip it.)
+      if (/\b(city|school|university|college|institution|employer|company)\b/i.test(f.label) || /^\W*location\b/i.test(f.label)) continue;
       const el = elements.get(f.key)?.el;
       if (!el || !(await openCombo(el))) continue;
       await sleep(150);
@@ -394,7 +400,10 @@
     // A file is already attached (the site's own autofill): swap it for yours.
     const existing = attachedName(input);
     if (existing && existing !== res.name) {
-      const remove = fileBox(input)?.querySelector('button[aria-label*="remove" i], button[title*="remove" i], [class*="remove" i] button, button[class*="remove" i]');
+      // Only the file's own remove button: never "Remove education" or another row's button nearby.
+      const remove = [...(fileBox(input)?.querySelectorAll('button[aria-label*="remove" i], button[title*="remove" i], [class*="remove" i] button, button[class*="remove" i]') || [])].find(
+        (b) => !/education|employment|experience|question|row|entry/i.test(`${b.getAttribute("aria-label") || ""} ${b.title || ""} ${textOf(b)}`),
+      );
       if (remove) {
         const id = input.id;
         remove.click();
@@ -493,6 +502,33 @@
     return false;
   }
 
+  /** The form's fields by id, to notice when the site rebuilds part of it. */
+  function formShape() {
+    return [...document.querySelectorAll("input, select, textarea")]
+      .filter((el) => !el.closest("#job-finder-helper") && (el.type === "file" || visible(el)))
+      .map((el) => el.id || el.name || el.type)
+      .join("|");
+  }
+
+  /** Waits until the form stops changing: at least 2.5 s, then 1.5 s with no changes, 12 s at most. */
+  async function settle(before) {
+    const root = document.querySelector("form") || document.body;
+    let last = Date.now();
+    const start = last;
+    const obs = new MutationObserver(() => (last = Date.now()));
+    obs.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
+    try {
+      while (Date.now() - start < 12000) {
+        await sleep(250);
+        const quiet = Date.now() - last;
+        if (Date.now() - start >= 2500 && quiet >= 1500) break;
+        if (formShape() !== before && quiet >= 1000) break;
+      }
+    } finally {
+      obs.disconnect();
+    }
+  }
+
   async function fill(options = {}, progress) {
     progress("Reading the form…");
     aiKeys.clear();
@@ -501,12 +537,60 @@
     progress("Reading the dropdown choices…");
     await readComboOptions(fields, elements);
     const ids = { jobId: options.jobId || undefined, foundId: options.foundId || undefined };
-    const res = await api("POST", "/api/apply/fill", { url: location.href, pageTitle: document.title, fields, auto: Boolean(options.auto), ...ids });
-    if (!res.ok) throw new Error(res.data?.error || "Job Finder couldn't answer");
-    const { answers, job } = res.data;
+    const ask = async (fields) => {
+      const res = await api("POST", "/api/apply/fill", { url: location.href, pageTitle: document.title, fields, auto: Boolean(options.auto), ...ids });
+      if (!res.ok) throw new Error(res.data?.error || "Job Finder couldn't answer");
+      return res.data;
+    };
+    let { answers, job } = await ask(fields);
     lastFill = { fields, answers, elements, ids: { jobId: ids.jobId || job?.jobId, foundId: ids.foundId || job?.foundId } };
+    // Files first. Some forms read the resume and rebuild parts of the form from it (Greenhouse
+    // replaces the education rows and fills name and email), so wait for that, read the form
+    // again and answer the new fields, then fill everything else over what the site guessed.
     let filled = 0;
-    for (const a of answers) {
+    const before = formShape();
+    let attachedNew = false;
+    for (const a of answers.filter((x) => x.file)) {
+      const entry = elements.get(a.key);
+      if (!entry) continue;
+      progress("Attaching your files…");
+      const had = entry.kind === "single" ? attachedName(entry.el) || entry.el.files?.[0]?.name || "" : "";
+      if (await applyAnswer(entry, a)) {
+        filled++;
+        if ((attachedName(entry.el) || entry.el.files?.[0]?.name || "") !== had) attachedNew = true;
+      }
+    }
+    let rest = answers.filter((x) => !x.file);
+    if (attachedNew) {
+      progress("Waiting for the form to read your resume…");
+      await settle(before);
+      if (formShape() !== before) {
+        progress("The form changed. Reading it again…");
+        const again = scan();
+        await readComboOptions(again.fields, again.elements);
+        const data = await ask(again.fields);
+        // Files attached above whose box the site redrew without a file input: keep them in the report.
+        const firstFiles = answers.filter((x) => x.file && elements.get(x.key));
+        answers = data.answers;
+        for (const a of firstFiles) {
+          const f = fields.find((x) => x.key === a.key);
+          if (!f || again.fields.some((x) => x.type === "file" && x.label === f.label)) continue;
+          const key = `${a.key}-file`;
+          again.fields.push({ ...f, key });
+          again.elements.set(key, elements.get(a.key));
+          answers.push({ ...a, key });
+        }
+        job = data.job || job;
+        lastFill = { fields: again.fields, answers, elements: again.elements, ids: lastFill.ids };
+        fields.splice(0, fields.length, ...again.fields);
+        elements.clear();
+        for (const [k, v] of again.elements) elements.set(k, v);
+        filled = answers.filter((x) => x.file && isFilled(elements.get(x.key))).length;
+        // Files the new form still lacks (a cover letter box that appeared) are attached with the rest.
+        rest = answers.filter((x) => !(x.file && isFilled(elements.get(x.key))));
+      }
+    }
+    for (const a of rest) {
       progress(`Filling ${filled + 1} of ${answers.length}…`);
       if (await applyAnswer(elements.get(a.key), a)) filled++;
       await sleep(60);

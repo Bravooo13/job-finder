@@ -1,5 +1,7 @@
 // Build with tests/e2e/fixtures/build.sh. A mock Greenhouse application form: React Select dropdowns (static, type-to-search and multi),
 // Greenhouse's education rows, a file upload, consent questions and a Submit that validates.
+// Like the real Greenhouse, attaching a resume "reads" it: the education row is replaced by a new one
+// (school--0 → school--1, with a wrong school guessed) and each row has a "Remove education" button.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import Select from "react-select";
@@ -44,17 +46,18 @@ function Combo({ id, label, required, options, async: isAsync, multi, values, se
 }
 
 function App() {
-  const [values, set] = useState({});
+  const [values, set] = useState({ country: { value: "United States +1", label: "United States +1" } });
+  const [row, setRow] = useState(0);
   const [errors, setErrors] = useState([]);
   const [done, setDone] = useState(false);
   const [fileName, setFileName] = useState("");
   const combos = [
     { id: "country", label: "Country", required: true, options: ["Canada +1", "China +86", "United States +1"] },
     { id: "candidate-location", label: "Location (City)", required: true, options: CITIES, async: true },
-    { id: "school--0", label: "School", required: true, options: SCHOOLS, async: true },
-    { id: "degree--0", label: "Degree", required: true, options: ["High School", "Associate's Degree", "Bachelor's Degree", "Master's Degree", "Doctor of Philosophy (Ph.D.)", "Other"] },
-    { id: "discipline--0", label: "Discipline", required: true, options: ["Computer Science", "Data Science", "Economics", "Statistics", "Other"] },
-    { id: "end-month--0", label: "End date month", required: true, options: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] },
+    { id: `school--${row}`, label: "School", required: true, options: SCHOOLS, async: true },
+    { id: `degree--${row}`, label: "Degree", required: true, options: ["High School", "Associate's Degree", "Bachelor's Degree", "Master's Degree", "Doctor of Philosophy (Ph.D.)", "Other"] },
+    { id: `discipline--${row}`, label: "Discipline", required: true, options: ["Computer Science", "Data Science", "Economics", "Statistics", "Other"] },
+    { id: `end-month--${row}`, label: "End date month", required: true, options: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] },
     { id: "question_1", label: "Are you legally authorized to work in the US now and in the future for any employer without visa sponsorship?", required: true, options: ["Yes", "No"] },
     { id: "question_2", label: "Will you now or in the future require sponsorship for employment visa status (e.g., H-1B)?", required: true, options: ["Yes", "No"] },
     { id: "question_3", label: "What is your overall, total GPA?", required: true, options: ["3.5+", "3.0-3.49", "2.5-2.99", "No GPA"] },
@@ -100,13 +103,28 @@ function App() {
             {fileName} <button type="button" aria-label="Remove file" onClick={() => setFileName("")}>×</button>
           </span>
         ) : (
-          <input id="resume" type="file" onChange={(e) => setFileName(e.target.files?.[0]?.name || "")} />
+          <input
+            id="resume"
+            type="file"
+            onChange={(e) => {
+              setFileName(e.target.files?.[0]?.name || "");
+              // "Reading" the resume: a new education row with a guessed school.
+              if (row === 0)
+                setTimeout(() => {
+                  setRow(1);
+                  set((s) => ({ ...s, "school--1": { value: "Grinnell College", label: "Grinnell College" } }));
+                }, 900);
+            }}
+          />
         )}
       </div>
       {combos.slice(0, 6).map((c) => <Combo key={c.id} {...c} values={values} set={set} />)}
-      <Field id="end-year--0" label="End date year" required>
-        <input id="end-year--0" name="end-year--0" type="number" aria-required="true" />
+      <Field id={`end-year--${row}`} label="End date year" required>
+        <input key={row} id={`end-year--${row}`} name={`end-year--${row}`} type="number" aria-required="true" />
       </Field>
+      <button type="button" aria-label="Remove education" onClick={() => setRow((r) => r + 1)}>
+        Remove education
+      </button>
       {combos.slice(6).map((c) => <Combo key={c.id} {...c} values={values} set={set} />)}
       {WITH_EXTRA ? (
         <Field id="question_8" label="Cover Letter" required>

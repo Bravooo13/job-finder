@@ -9,7 +9,7 @@ how he likes to work) is in **`USER.md`** next to this file. It is local only
 (gitignored) because this repo is public. Read it if it exists, and never
 commit personal data: no names, emails, resumes, job lists or database files.
 
-## Status (updated 2026-10-30)
+## Status (updated 2026-10-31)
 
 Shipped in the 2026-10-29 round (list under "Changelog" at the end): job
 classification and Found-jobs filters (industry, role, visa/OPT/CPT/H-1B,
@@ -560,6 +560,19 @@ widths and look for console errors. Extension scripts should pass
   links point at an ATS.
 
 ## Changelog
+
+**2026-10-31**
+- Extension 0.2.1: Fill attaches files first, waits for the form to settle and
+  reads it again when it changed. Greenhouse reads an attached resume and
+  replaces the education rows (`school--0` → `school--1`, `school--2`) and
+  guesses name and email, so the old fields were gone and School, Degree,
+  Discipline and dates stayed empty. Everything else is now filled over the
+  site's guesses. Also: "Office location preference" dropdowns are read
+  (only labels *starting* with "Location" count as type-to-search), a choice
+  that is already picked (phone country "+1") counts as done, and swapping an
+  attached file only clicks the file's own remove button, never "Remove
+  education". The mock form in `tests/e2e/fixtures` rebuilds its education row
+  after an upload, like Greenhouse.
 
 **2026-10-30**
 - One set of actions for the owner and for AI (`src/lib/control`): 35 actions,
