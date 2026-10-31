@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Job Finder Helper",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Send jobs from LinkedIn, Handshake and any careers page to your Job Finder, fill job applications from your saved answers, and run Auto apply.",
   "permissions": [
     "storage",

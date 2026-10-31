@@ -577,6 +577,12 @@ widths and look for console errors. Extension scripts should pass
   re-mounts, same id) are found again by id before filling and checking, so
   answers no longer go into detached elements. The mock form redraws its
   education row when a school is picked.
+- Extension 0.2.3: Auto apply lets the site's own autofill finish before it
+  fills (a signed-in MyGreenhouse account fills contact and education a few
+  seconds after the page loads), then fills over it with My info. A form that
+  only lacks what the owner must do on the page ("I'm not a robot", consent
+  ticks, a CAPTCHA) stays open in its tab, ready for his tick and Submit;
+  other finished forms close unless "keep tabs" is on.
 
 **2026-10-30**
 - One set of actions for the owner and for AI (`src/lib/control`): 35 actions,

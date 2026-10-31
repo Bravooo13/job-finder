@@ -805,6 +805,10 @@
         return send({ action: "needs_you", summary: "This site wants you to sign in or create an account first.", needs: ["Sign in on this site"] });
       }
 
+      // The site's own autofill (a signed-in MyGreenhouse account fills contact and education rows)
+      // may still be running: let it finish, then fill over it with your answers.
+      progress("letting the site's own autofill finish…");
+      await settle(formShape());
       await fill({ auto: true, jobId: o.jobId, foundId: o.foundId }, progress);
       const notes = [];
       if (o.ai?.ready && o.settings?.coverLetters !== "never") {

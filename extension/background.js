@@ -144,7 +144,11 @@ async function finish(state, body) {
   if (!state) return;
   await report(state.task.id, body);
   await detach(state.tabId);
-  const keep = state.settings?.keepTabs !== false && ["held", "needs_you"].includes(body.status);
+  // A form that only lacks what you must do on the page yourself ("I'm not a robot", a consent tick,
+  // a CAPTCHA) stays open, ready for you to tick and press Submit. Others close unless you keep tabs.
+  const onPage = (n) => /robot|captcha|^tick\b|^solve\b/i.test(n);
+  const ready = body.status === "needs_you" && (body.needs || []).length > 0 && body.needs.every(onPage);
+  const keep = ready || (state.settings?.keepTabs !== false && ["held", "needs_you"].includes(body.status));
   if (!keep) chrome.tabs.remove(state.tabId).catch(() => {});
   await setState(null);
   await chrome.storage.session.set({ autoApplyLastDone: Date.now() });
