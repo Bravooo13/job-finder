@@ -593,6 +593,11 @@ widths and look for console errors. Extension scripts should pass
   come back empty after filling (MyGreenhouse shows a school and degree it
   never stored, so the row clears when another field in it changes) are
   filled again, twice at most.
+- Extension 0.2.6: after Submit, a page asking for a code the site emailed
+  ("security code", Greenhouse's email check) comes back as "needs you" with
+  the tab open; the tab now always stays open when Submit was pressed and no
+  thank-you showed (it closed before, so nobody could see what happened);
+  short validation error lines are seen (they were skipped by a size check).
 - Answer engine, from the first live run (Stripe, Coinbase, DoorDash, C3.ai,
   Pinterest): "What U.S. state do you reside in?" (was read as a
   near-the-office question), "authorized to work in the country where this

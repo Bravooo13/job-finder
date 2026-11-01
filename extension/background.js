@@ -146,9 +146,10 @@ async function finish(state, body) {
   await detach(state.tabId);
   // A form that only lacks what you must do on the page yourself ("I'm not a robot", a consent tick,
   // a CAPTCHA) stays open, ready for you to tick and press Submit. Others close unless you keep tabs.
-  const onPage = (n) => /robot|captcha|^tick\b|^solve\b/i.test(n);
+  const onPage = (n) => /robot|captcha|^tick\b|^solve\b|code the site emailed/i.test(n);
   const ready = body.status === "needs_you" && (body.needs || []).length > 0 && body.needs.every(onPage);
-  const keep = ready || (state.settings?.keepTabs !== false && ["held", "needs_you"].includes(body.status));
+  // After Submit was pressed, the tab always stays: it's the only place to see what happened.
+  const keep = ready || (state.phase === "submit" && body.status !== "submitted") || (state.settings?.keepTabs !== false && ["held", "needs_you"].includes(body.status));
   if (!keep) chrome.tabs.remove(state.tabId).catch(() => {});
   await setState(null);
   await chrome.storage.session.set({ autoApplyLastDone: Date.now() });
@@ -241,16 +242,20 @@ function outcomeProbe() {
   const captcha = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"], iframe[title*="challenge" i]')].some(visible);
   const errors = [...document.querySelectorAll('[aria-invalid="true"]')]
     .map((el) => (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText) || el.getAttribute("aria-label") || el.name || "")
-    .concat([...document.querySelectorAll('.error, .error-message, .field-error, [class*="error-text" i], [role="alert"]')].filter(visible).map((e) => e.innerText))
+    // Error lines are short, so only check that they show at all.
+    .concat([...document.querySelectorAll('.error, .error-message, .field-error, [class*="error-text" i], [class*="helper-text--error" i], [role="alert"]')].filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== "hidden").map((e) => e.innerText))
     .map((t) => (t || "").replace(/\s+/g, " ").trim())
     .filter((t) => t && t.length < 200);
   const fields = document.querySelectorAll("form input:not([type=hidden]), form select, form textarea").length;
-  return { thanks, captcha, errors: [...new Set(errors)].slice(0, 8), fields, url: location.href };
+  // Greenhouse (and others) may email a security code to confirm it's you before accepting the application.
+  const code = /(security|verification|confirmation) code|enter the (\d+[- ]character )?code|we('ve| have) (sent|emailed) (you )?(a|an) .{0,30}code/i.test(text);
+  return { thanks, captcha, code, errors: [...new Set(errors)].slice(0, 8), fields, url: location.href };
 }
 
 async function submitAndWatch(state, result) {
   await report(state.task.id, { status: "submitting", summary: "Pressing Submit…", answers: result.answers, checks: result.checks });
-  await setState({ ...state, phase: "submit" });
+  state = { ...state, phase: "submit" };
+  await setState(state);
   const before = await evaluate(state.tabId, outcomeProbe);
   const clicked = result.submit && (await input(state.tabId, { kind: "click", x: result.submit.x, y: result.submit.y })).ok;
   if (!clicked) await evaluate(state.tabId, () => document.querySelector("[data-jf-submit]")?.click());
@@ -263,6 +268,15 @@ async function submitAndWatch(state, result) {
     const moved = before && now.url !== before.url;
     if ((now.thanks && (!before?.thanks || moved)) || (moved && now.fields === 0 && !now.errors.length)) {
       return finish(state, { status: "submitted", summary: "Submitted. Marked applied in Job Finder.", url: before?.url, answers: result.answers, checks: result.checks });
+    }
+    if (now.code && !now.thanks) {
+      return finish(state, {
+        status: "needs_you",
+        summary: "The site emailed you a code to confirm the application. Type it in the open tab and press Submit, then mark it submitted here.",
+        needs: ["Type the code the site emailed you and press Submit"],
+        answers: result.answers,
+        checks: result.checks,
+      });
     }
     if (now.captcha) {
       return finish(state, {
