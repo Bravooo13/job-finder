@@ -550,6 +550,9 @@
     aiKeys.clear();
     const { fields, elements } = scan();
     if (!fields.length) throw new Error("No form fields found on this page. Open the application form first.");
+    // The shape the answers are for. Opening dropdowns or attaching files can make the site
+    // rebuild parts of the form (a signed-in MyGreenhouse fills its own education rows).
+    const scanned = formShape();
     progress("Reading the dropdown choices…");
     await readComboOptions(fields, elements);
     const ids = { jobId: options.jobId || undefined, foundId: options.foundId || undefined };
@@ -580,7 +583,9 @@
     if (attachedNew) {
       progress("Waiting for the form to read your resume…");
       await settle(before);
-      if (formShape() !== before) {
+    } else if (formShape() !== scanned) await settle(formShape());
+    if (formShape() !== scanned) {
+      {
         progress("The form changed. Reading it again…");
         const again = scan();
         await readComboOptions(again.fields, again.elements);
@@ -610,6 +615,19 @@
       progress(`Filling ${filled + 1} of ${answers.length}…`);
       if (await applyAnswer(elements.get(a.key), a)) filled++;
       await sleep(60);
+    }
+    // Some forms redraw a section from their own state when another field in it changes, which
+    // clears a choice the site had shown but never stored (MyGreenhouse's school and degree).
+    // Fill what came back empty again, twice at most.
+    for (let pass = 0; pass < 2; pass++) {
+      const cleared = rest.filter((a) => a.value !== null && a.value !== undefined && !a.file && !isFilled(elements.get(a.key)));
+      if (!cleared.length) break;
+      progress(`Filling ${cleared.length} field${cleared.length > 1 ? "s" : ""} the page cleared…`);
+      await sleep(500);
+      for (const a of cleared) {
+        await applyAnswer(elements.get(a.key), a);
+        await sleep(60);
+      }
     }
     releaseInput();
     const check = answers.filter((a) => a.value !== null && a.confidence !== "high").length;

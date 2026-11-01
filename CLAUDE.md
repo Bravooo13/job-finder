@@ -587,6 +587,12 @@ widths and look for console errors. Extension scripts should pass
   `size=invisible`) is no longer reported as an "I'm not a robot" box to tick;
   only a real checkbox widget blocks. A challenge after Submit still comes
   back as "needs you" with the tab left open.
+- Extension 0.2.5: the form is read again whenever it changed after the first
+  read, not only after a file upload (opening dropdowns starts a signed-in
+  MyGreenhouse autofill that rebuilds the education rows), and fields that
+  come back empty after filling (MyGreenhouse shows a school and degree it
+  never stored, so the row clears when another field in it changes) are
+  filled again, twice at most.
 - Answer engine, from the first live run (Stripe, Coinbase, DoorDash, C3.ai,
   Pinterest): "What U.S. state do you reside in?" (was read as a
   near-the-office question), "authorized to work in the country where this
