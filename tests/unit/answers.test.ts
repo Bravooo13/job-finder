@@ -327,3 +327,19 @@ test("questions from live forms: state of residence, work authorization by count
     ms: "Yes", ft: "Yes", ft2: "No", ref: "No",
   });
 });
+
+test("short acknowledgments count as consent: a lone “I Accept” box, “I understand that … may use AI tools”", () => {
+  const p = applyProfileSchema.parse({});
+  const [box, ack] = answerFields(
+    [
+      { key: "box", label: "I Accept", type: "checkbox" },
+      { key: "ack", label: "I understand that Example may use AI tools to assist in the application and interview process.*", type: "combobox", options: ["Yes"] },
+    ],
+    p,
+    { consent: true },
+  );
+  assert.equal(box.value, true);
+  assert.equal(ack.value, "Yes");
+  const [off] = answerFields([{ key: "box", label: "I Accept", type: "checkbox" }], p, {});
+  assert.equal(off.value, null, "without the consent setting it waits for the owner");
+});

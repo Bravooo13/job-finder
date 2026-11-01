@@ -286,7 +286,7 @@ const ACK_OPTION = /^(acknowledged?|i acknowledge|i agree|agreed?|i accept|accep
 const MARKETING =
   /(newsletter|marketing|promotional|job alerts?|talent (community|network|pool)|future (job )?(opportunities|openings|roles)|keep (me|you) (informed|updated|in mind)|receive (emails?|updates|news|communications|offers))/;
 const CONSENT_Q =
-  /\bi (hereby )?certify|certify that|\battest|by (checking|clicking|selecting|ticking|submitting)|i (have read|acknowledge|understand and agree|agree|consent)|\backnowledg|\bconsent\b|agree to|privacy (policy|notice|statement)|terms (and|&) conditions|terms of (use|service)|review (our|the) .{0,40}polic|accurate and complete|true,? (complete|correct|and accurate)/;
+  /\bi (hereby )?certify|certify that|^i (accept|agree)\b|\bi understand that\b|\battest|by (checking|clicking|selecting|ticking|submitting)|i (have read|acknowledge|understand and agree|agree|consent)|\backnowledg|\bconsent\b|agree to|privacy (policy|notice|statement)|terms (and|&) conditions|terms of (use|service)|review (our|the) .{0,40}polic|accurate and complete|true,? (complete|correct|and accurate)/;
 
 // -------------------------------------------------------------------- rules
 
