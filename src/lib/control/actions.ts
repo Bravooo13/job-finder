@@ -6,8 +6,8 @@ import { buildSystemPrompt, resumeToText, type ChatContext } from "@/lib/ai/cont
 import { forApplying } from "@/lib/ai/models";
 import { runChat, stripThinking } from "@/lib/ai/providers";
 import { getAiSettings, getAiStatus } from "@/lib/ai/settings";
-import { actOnTask, enqueueApplications, getAutoSettings, getResumeFile, getTask, helperLastSeen, listTasks, saveAutoSettings } from "@/lib/apply/auto";
-import { SUBMIT_MODES, TASK_STATUSES, type TaskStatus } from "@/lib/apply/auto-schema";
+import { actOnTask, enqueueApplications, getAutoSettings, getResumeFile, getTask, helperLastSeen, listTasks, saveAutoSettings, sendReady } from "@/lib/apply/auto";
+import { HELPER_VERSION, olderVersion, SUBMIT_MODES, TASK_ACTIONS, TASK_STATUSES, WAITING_STATUSES, type TaskStatus } from "@/lib/apply/auto-schema";
 import { fillAnswers, fillSchema } from "@/lib/apply/fill";
 import { findJobById, findJobForUrl, markAppliedByUrl, rememberAnswer } from "@/lib/apply/jobs";
 import { letterForApplication, saveLetterForApplication } from "@/lib/apply/letter";
@@ -407,7 +407,7 @@ export const ACTIONS: ActionDef[] = [
     name: "auto_apply_status",
     title: "Check Auto apply",
     description:
-      "Auto apply's applications with their status (queued, running, submitting, held = waiting for the owner's OK, needs_you, submitted, failed), a summary, what only the owner can do (needs), answers to check (checks), whether the browser helper is running, and the settings.",
+      "Auto apply's applications with their status (queued, running, submitting, ready = checked and ready to send, held = waiting for the owner's OK, needs_you, unsure = Submit was pressed but no thank-you showed (never retried; the owner checks his email), submitted, failed), a summary, what only the owner can do (needs), answers to check (checks), what the page showed after an unclear Submit (pageNote), whether the browser helper is running and up to date, and the settings.",
     group: "read",
     input: z.object({
       batchId: z.string().max(100).optional().describe("Only this batch (from auto_apply)."),
@@ -422,11 +422,32 @@ export const ACTIONS: ActionDef[] = [
         .filter((s): s is TaskStatus => (TASK_STATUSES as readonly string[]).includes(s));
       const [list, settings] = await Promise.all([listTasks({ status, batchId: a.batchId, limit: a.limit ?? 50 }), getAutoSettings()]);
       const seen = helperLastSeen();
+      const version = seen?.version ?? null;
       return {
         counts: list.counts,
-        helper: seen ? { running: Date.now() - seen.at < 90_000, lastSeen: new Date(seen.at).toISOString() } : { running: false, lastSeen: null },
+        helper: seen
+          ? {
+              running: Date.now() - seen.at < 90_000,
+              lastSeen: new Date(seen.at).toISOString(),
+              version,
+              upToDate: !version || !olderVersion(version, HELPER_VERSION),
+              note: version && olderVersion(version, HELPER_VERSION) ? `The owner needs to reload the extension (it runs ${version}, Job Finder expects ${HELPER_VERSION}).` : undefined,
+            }
+          : { running: false, lastSeen: null, version: null, upToDate: false },
         settings,
-        applications: list.tasks.map((t) => ({ id: t.id, title: t.title, company: t.company, status: t.status, summary: t.summary, needs: t.needs, checks: t.checks, url: t.url, updatedAt: t.updatedAt })),
+        applications: list.tasks.map((t) => ({
+          id: t.id,
+          title: t.title,
+          company: t.company,
+          status: t.status,
+          checkOnly: t.checkOnly,
+          summary: t.summary,
+          needs: t.needs,
+          checks: t.checks,
+          pageNote: t.pageNote,
+          url: t.url,
+          updatedAt: t.updatedAt,
+        })),
       };
     },
   }),
@@ -456,7 +477,7 @@ export const ACTIONS: ActionDef[] = [
       const [requests, decided, tasks] = await Promise.all([
         listRequests({ status: ["waiting"] }),
         listRequests({ status: ["done", "failed", "declined"], limit: 20 }),
-        listTasks({ status: ["held", "needs_you"], limit: 50 }),
+        listTasks({ status: WAITING_STATUSES, limit: 50 }),
       ]);
       const slim = (r: (typeof requests)[number]) => ({ id: r.id, action: r.action, title: r.title, by: ACTOR_LABELS[r.actor], via: r.via, status: r.status, result: r.result, error: r.error, createdAt: r.createdAt, decidedAt: r.decidedAt });
       return {
@@ -773,16 +794,18 @@ export const ACTIONS: ActionDef[] = [
     name: "auto_apply",
     title: "Queue applications for Auto apply",
     description:
-      "Queues applications for Auto apply. The Job Finder Helper extension in the owner's Chrome opens each form in a background tab, fills it from My answers, attaches the right resume (and a cover letter when required), and submits it or holds it by the owner's Auto apply settings. One call per batch; then check with auto_apply_status. Jobs already applied to, already queued, or with only a LinkedIn/Handshake link are skipped with a reason.",
+      "Queues applications for Auto apply. The Job Finder Helper extension in the owner's Chrome opens each form in a background tab, fills it from My answers, attaches the right resume (and a cover letter when required), and submits it or holds it by the owner's Auto apply settings. One call per batch; then check with auto_apply_status. checkFirst: fill without Submit and report each form as ready (send later with send_ready_applications) or needs_you with the questions to answer — use it for a new batch so all questions are answered in one round. Skipped with a reason: jobs already applied to or queued, LinkedIn/Handshake-only links, Workday and other sign-in sites, postings that want a recorded video or an emailed submission (force: true queues those anyway).",
     group: "queue",
     input: z
       .object({
         foundIds: z.array(z.string().max(100)).max(100).optional().describe("Found job ids."),
         jobIds: z.array(z.string().max(100)).max(100).optional().describe("My jobs ids."),
         urls: z.array(z.string().url()).max(100).optional().describe("Application page URLs."),
+        checkFirst: z.boolean().optional().describe("Fill without Submit and list the questions (default: the owner's Check questions first setting)."),
+        force: z.boolean().optional().describe("Queue Workday, sign-in sites and video/email postings anyway (they will come back needs_you)."),
       })
       .refine((b) => (b.jobIds?.length ?? 0) + (b.foundIds?.length ?? 0) + (b.urls?.length ?? 0) > 0, "Give foundIds, jobIds or urls"),
-    explain: async (a) => `Queue for Auto apply: ${[await jobNames(a), ...(a.urls ?? []).slice(0, 3)].filter(Boolean).join("; ")}`,
+    explain: async (a) => `${a.checkFirst ? "Check the questions of" : "Queue for Auto apply"}: ${[await jobNames(a), ...(a.urls ?? []).slice(0, 3)].filter(Boolean).join("; ")}`,
     status: (a) => `Queuing ${(a.foundIds?.length ?? 0) + (a.jobIds?.length ?? 0) + (a.urls?.length ?? 0)} applications for Auto apply`,
     run: async (a) => {
       const r = await enqueueApplications({ ...a, by: "agent" });
@@ -795,19 +818,32 @@ export const ACTIONS: ActionDef[] = [
     name: "auto_apply_action",
     title: "Act on an Auto apply application",
     description:
-      "One Auto apply application: retry, cancel (a queued one), remove (from the list), submitted (the owner sent it himself; marks the job applied) or approve (submit a held one; this is the owner's call and usually waits for his OK).",
-    group: (a) => (a.action === "approve" ? "approve" : a.action === "submitted" ? "track" : "queue"),
+      "One Auto apply application: retry (again, or re-check a ready one), send (a ready one: fill and submit), cancel (a queued one), remove (from the list), submitted (the owner confirmed it went through, e.g. by email; marks the job applied), approve (submit a held one) or reopen (an unsure one didn't go through: fill and submit again). approve and reopen are the owner's call and usually wait for his OK. retry/send/approve are refused on unsure applications (Submit was already pressed; no duplicates).",
+    group: (a) => (a.action === "approve" || a.action === "reopen" ? "approve" : a.action === "submitted" ? "track" : "queue"),
     explain: async (a) =>
-      `${{ approve: "Submit the held application", retry: "Try again", cancel: "Cancel", remove: "Remove from Auto apply", submitted: "Mark as submitted" }[a.action]}: ${await taskName(a.id)}`,
+      `${{ approve: "Submit the held application", retry: "Try again", cancel: "Cancel", remove: "Remove from Auto apply", submitted: "Mark as submitted", send: "Send the checked application", reopen: "It didn't go through: submit again" }[a.action]}: ${await taskName(a.id)}`,
     input: z.object({
       id: id("The application id (from auto_apply_status)."),
-      action: z.enum(["approve", "retry", "cancel", "remove", "submitted"]),
+      action: z.enum(TASK_ACTIONS),
     }),
     status: (a) => `Auto apply: ${a.action}`,
     run: async (a) => {
       const task = await actOnTask(a.id, a.action);
       if (!task) throw new Error("No application with that id");
       return { id: task.id, title: task.title, company: task.company, status: task.status, summary: task.summary };
+    },
+  }),
+  action({
+    name: "send_ready_applications",
+    title: "Send the checked applications",
+    description:
+      "Sends every application that was checked (status ready: every required question answered) to be filled and submitted by the owner's Auto apply settings. Optionally only one batch.",
+    group: "queue",
+    input: z.object({ batchId: z.string().max(100).optional().describe("Only this batch (from auto_apply).") }),
+    status: () => "Sending the checked applications",
+    run: async (a) => {
+      const r = await sendReady(a.batchId);
+      return { ...r, note: r.sent.length ? "The browser helper submits them one by one; check with auto_apply_status." : "Nothing was ready." };
     },
   }),
   action({
@@ -880,7 +916,7 @@ export const ACTIONS: ActionDef[] = [
     name: "update_auto_apply_settings",
     title: "Change Auto apply settings",
     description:
-      "Changes Auto apply settings: submit (sure = only when every answer came from My answers / review = hold everything / fill = fill only / always), consent (tick consent and certify boxes), essays, aiPick, resume (match / file / generated), coverLetters (required / always / never), pauseSeconds, keepTabs, enabled. Changing submit or consent counts as approving submissions, so it usually waits for the owner.",
+      "Changes Auto apply settings: submit (sure = only when every answer came from My answers / review = hold everything / fill = fill only / always), consent (tick consent and certify boxes), essays, aiPick, resume (match / file / generated), coverLetters (required / always / never), pauseSeconds, keepTabs, checkFirst (new applications are checked without Submit), enabled. Changing submit or consent counts as approving submissions, so it usually waits for the owner.",
     group: (a) => (a.submit !== undefined || a.consent !== undefined ? "approve" : "settings"),
     // No defaults here: only the settings given change.
     input: z.object({
@@ -892,6 +928,7 @@ export const ACTIONS: ActionDef[] = [
       coverLetters: z.enum(["required", "always", "never"]).optional(),
       pauseSeconds: z.number().int().min(5).max(600).optional(),
       keepTabs: z.boolean().optional(),
+      checkFirst: z.boolean().optional(),
       enabled: z.boolean().optional(),
     }),
     explain: async (a) =>

@@ -87,20 +87,22 @@ export async function finishRequest(id: string, set: { status: "done" | "failed"
   return row ?? null;
 }
 
-/** How many things wait for you: AI requests plus applications Auto apply held or needs you for. */
-export async function waitingCounts(): Promise<{ requests: number; held: number; needsYou: number; total: number }> {
+/** How many things wait for you: AI requests plus applications that are ready to send, held, need you or may have been sent. */
+export async function waitingCounts(): Promise<{ requests: number; held: number; needsYou: number; ready: number; unsure: number; total: number }> {
   const [[r], tasks] = await Promise.all([
     db.select({ n: sql<number>`count(*)` }).from(actionRequests).where(eq(actionRequests.status, "waiting")),
     db
       .select({ status: applyTasks.status, n: sql<number>`count(*)` })
       .from(applyTasks)
-      .where(inArray(applyTasks.status, ["held", "needs_you"]))
+      .where(inArray(applyTasks.status, ["held", "needs_you", "ready", "unsure"]))
       .groupBy(applyTasks.status),
   ]);
   const held = Number(tasks.find((t) => t.status === "held")?.n ?? 0);
   const needsYou = Number(tasks.find((t) => t.status === "needs_you")?.n ?? 0);
+  const ready = Number(tasks.find((t) => t.status === "ready")?.n ?? 0);
+  const unsure = Number(tasks.find((t) => t.status === "unsure")?.n ?? 0);
   const requests = Number(r?.n ?? 0);
-  return { requests, held, needsYou, total: requests + held + needsYou };
+  return { requests, held, needsYou, ready, unsure, total: requests + held + needsYou + ready + unsure };
 }
 
 // ------------------------------------------------------------ AI spending

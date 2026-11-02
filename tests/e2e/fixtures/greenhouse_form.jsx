@@ -15,6 +15,9 @@ const later = (list) => (q) => new Promise((r) => setTimeout(() => r(opts(list.f
 
 const params = new URLSearchParams(location.search);
 const WITH_EXTRA = params.get("token") === "779";
+// After Submit: 781 asks for a code it "emailed"; 783 shows nothing at all (no thank-you, no error).
+const CODE_STEP = params.get("token") === "781";
+const SILENT = params.get("token") === "783";
 
 function Field({ id, label, required, children }) {
   return (
@@ -48,6 +51,7 @@ function Combo({ id, label, required, options, async: isAsync, multi, values, se
 function App() {
   const [values, set] = useState({ country: { value: "United States +1", label: "United States +1" } });
   const [row, setRow] = useState(0);
+  const [codeStep, setCodeStep] = useState(false);
   const [errors, setErrors] = useState([]);
   const [done, setDone] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -77,6 +81,8 @@ function App() {
     window.submittedValues = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Array.isArray(v) ? v.map((x) => x.label) : v?.label]));
     window.submittedText = Object.fromEntries([...form.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([role=combobox]), textarea")].filter((x) => x.id).map((x) => [x.id, x.value]));
     fetch("/__submit", { method: "POST", body: JSON.stringify({ token: params.get("token"), values: window.submittedValues, text: window.submittedText, file: fileName, gdpr: form.querySelector("#gdpr_demographic_data_consent_given_1").checked }) });
+    if (CODE_STEP) return setCodeStep(true);
+    if (SILENT) return;
     history.pushState({}, "", location.pathname + "/confirmation" + location.search);
     setDone(true);
   }
@@ -142,6 +148,13 @@ function App() {
         <input type="checkbox" id="gdpr_demographic_data_consent_given_1" name="gdpr" required />
         <label htmlFor="gdpr_demographic_data_consent_given_1">By checking this box, I consent to E2E Co collecting, storing, and processing my responses to the demographic data surveys above.*</label>
       </div>
+      {codeStep ? (
+        <div className="field">
+          <p>Enter the 8-character code we sent to your email to confirm you&apos;re a human.</p>
+          <label htmlFor="security_code">Security code</label>
+          <input id="security_code" name="security_code" type="text" />
+        </div>
+      ) : null}
       {errors.length ? <div role="alert" className="error">Please fill in: {errors.join(", ")}</div> : null}
       <button type="submit">Submit application</button>
     </form>

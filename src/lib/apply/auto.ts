@@ -8,7 +8,8 @@ import { applyTasks, companies, discoveredJobs, jobs, settings, type ApplyTaskAn
 import { updateJobStatus } from "@/lib/jobs/actions";
 import { saveFoundJob } from "@/lib/search/actions";
 import { applicationUrl } from "./apply-url";
-import { autoApplySettingsSchema, OPEN_STATUSES, type AutoApplySettings, type TaskStatus } from "./auto-schema";
+import { autoApplySettingsSchema, OPEN_STATUSES, type AutoApplySettings, type TaskAction, type TaskStatus } from "./auto-schema";
+import { queueBlocker } from "./outcome";
 import { findJobForUrl, markAppliedByUrl } from "./jobs";
 import { onlyProvided } from "./profile-schema";
 
@@ -105,6 +106,10 @@ export interface EnqueueInput {
   foundIds?: string[];
   urls?: string[];
   by?: "you" | "agent";
+  /** Fill without Submit and report the questions it can't answer (default: the Check questions first setting). */
+  checkFirst?: boolean;
+  /** Queue even postings Auto apply can't finish by itself (Workday, a video to record…). */
+  force?: boolean;
 }
 
 export interface EnqueueResult {
@@ -119,6 +124,7 @@ interface Candidate {
   title: string;
   company: string;
   status?: string;
+  description?: string | null;
   ref: { url: string | null; applyUrl?: string | null; provider?: string | null; boardToken?: string | null };
 }
 
@@ -128,7 +134,7 @@ async function candidates(input: EnqueueInput): Promise<Candidate[]> {
   const foundIds = [...new Set(input.foundIds ?? [])].slice(0, 100);
   if (jobIds.length) {
     const rows = await db
-      .select({ id: jobs.id, title: jobs.title, company: companies.name, status: jobs.status, url: jobs.url, applyUrl: jobs.applyUrl })
+      .select({ id: jobs.id, title: jobs.title, company: companies.name, status: jobs.status, url: jobs.url, applyUrl: jobs.applyUrl, description: jobs.description })
       .from(jobs)
       .innerJoin(companies, eq(jobs.companyId, companies.id))
       .where(inArray(jobs.id, jobIds));
@@ -139,7 +145,7 @@ async function candidates(input: EnqueueInput): Promise<Candidate[]> {
       .where(inArray(discoveredJobs.jobId, jobIds));
     for (const r of rows) {
       const f = found.find((x) => x.jobId === r.id);
-      out.push({ jobId: r.id, foundId: null, title: r.title, company: r.company, status: r.status, ref: { url: r.url, applyUrl: r.applyUrl, provider: f?.provider, boardToken: f?.boardToken } });
+      out.push({ jobId: r.id, foundId: null, title: r.title, company: r.company, status: r.status, description: r.description, ref: { url: r.url, applyUrl: r.applyUrl, provider: f?.provider, boardToken: f?.boardToken } });
     }
   }
   if (foundIds.length) {
@@ -153,6 +159,7 @@ async function candidates(input: EnqueueInput): Promise<Candidate[]> {
         title: r.title,
         company: r.company,
         status: statuses.find((s) => s.id === r.jobId)?.status,
+        description: r.description,
         ref: { url: r.url, applyUrl: r.applyUrl, provider: r.provider, boardToken: r.boardToken },
       });
     }
@@ -171,6 +178,7 @@ export async function enqueueApplications(input: EnqueueInput): Promise<EnqueueR
   const batchId = crypto.randomUUID();
   const result: EnqueueResult = { batchId, queued: [], skipped: [] };
   const list = await candidates(input);
+  const checkOnly = input.checkFirst ?? (await getAutoSettings()).checkFirst;
   const open = list.length
     ? await db
         .select({ jobId: applyTasks.jobId, foundId: applyTasks.foundId, url: applyTasks.url })
@@ -186,6 +194,11 @@ export async function enqueueApplications(input: EnqueueInput): Promise<EnqueueR
     const url = "url" in target ? target.url : (c.ref.applyUrl ?? c.ref.url ?? "");
     if (open.some((o) => (c.jobId && o.jobId === c.jobId) || (c.foundId && o.foundId === c.foundId) || o.url === url)) {
       result.skipped.push({ title: c.title, company: c.company, reason: "Already in Auto apply" });
+      continue;
+    }
+    const blocker = !input.force && url ? queueBlocker(url, c.description) : null;
+    if (blocker) {
+      result.skipped.push({ title: c.title, company: c.company, reason: blocker });
       continue;
     }
     const needsLink = "error" in target;
@@ -204,6 +217,7 @@ export async function enqueueApplications(input: EnqueueInput): Promise<EnqueueR
         checks: [],
         answers: [],
         by: input.by ?? "you",
+        checkOnly,
         finishedAt: needsLink ? new Date() : null,
       })
       .returning({ id: applyTasks.id });
@@ -214,7 +228,7 @@ export async function enqueueApplications(input: EnqueueInput): Promise<EnqueueR
     const names = result.queued.slice(0, 3).map((q) => q.company).join(", ");
     await noteActivity({
       action: "auto_apply",
-      title: `Queued ${result.queued.length} application${result.queued.length === 1 ? "" : "s"} for Auto apply${names ? ` (${names}${result.queued.length > 3 ? "…" : ""})` : ""}${result.skipped.length ? `, skipped ${result.skipped.length}` : ""}`,
+      title: `${checkOnly ? "Queued to check" : "Queued"} ${result.queued.length} application${result.queued.length === 1 ? "" : "s"} for Auto apply${names ? ` (${names}${result.queued.length > 3 ? "…" : ""})` : ""}${result.skipped.length ? `, skipped ${result.skipped.length}` : ""}`,
       detail: { batchId, queued: result.queued.length, skipped: result.skipped },
     });
   }
@@ -224,11 +238,17 @@ export async function enqueueApplications(input: EnqueueInput): Promise<EnqueueR
 /** Gives the browser helper the next application to fill, or null. */
 export async function claimNext(version?: string): Promise<ApplyTask | null> {
   helperSeen(version);
-  // Applications the helper started but never finished (Chrome closed, page hung).
+  // Applications the helper started but never finished (Chrome closed, page hung). One stopped
+  // after Submit was pressed may have reached the company, so it is never retried on its own.
+  const stale = new Date(Date.now() - 15 * 60_000);
   await db
     .update(applyTasks)
     .set({ status: "failed", summary: "The browser helper stopped before finishing. Press Retry.", finishedAt: new Date() })
-    .where(and(inArray(applyTasks.status, ["running", "submitting"]), lt(applyTasks.startedAt, new Date(Date.now() - 15 * 60_000))));
+    .where(and(eq(applyTasks.status, "running"), lt(applyTasks.startedAt, stale)));
+  await db
+    .update(applyTasks)
+    .set({ status: "unsure", summary: "Submit was pressed, then the browser helper stopped. Check your email for a confirmation.", finishedAt: new Date() })
+    .where(and(eq(applyTasks.status, "submitting"), lt(applyTasks.startedAt, stale)));
   const s = await getAutoSettings();
   if (!s.enabled) return null;
   for (let tries = 0; tries < 3; tries++) {
@@ -278,6 +298,8 @@ export interface TaskReport {
   checks?: string[];
   answers?: ApplyTaskAnswer[];
   url?: string;
+  /** What the page showed after Submit when there was no thank-you. */
+  pageNote?: string;
 }
 
 async function markApplied(task: ApplyTask): Promise<string | null> {
@@ -298,12 +320,26 @@ async function markApplied(task: ApplyTask): Promise<string | null> {
 }
 
 /** The browser helper's report on an application. */
-export async function reportTask(id: string, report: TaskReport): Promise<ApplyTask | null> {
+export async function reportTask(id: string, input: TaskReport): Promise<ApplyTask | null> {
   const task = await getTask(id);
   if (!task) return null;
-  const finished = ["held", "needs_you", "submitted", "failed", "canceled"].includes(report.status);
+  const report = { ...input };
+  const afterSubmit = task.status === "submitting" || Boolean(task.submitPressedAt);
+  // Check questions first: a form with every required answer is ready, never sent.
+  if (task.checkOnly && report.status === "held" && !afterSubmit) {
+    report.status = "ready";
+    report.summary = `Checked: every required question has an answer${report.checks?.length ? ` (${report.checks.length} to look over)` : ""}. Ready to send.`;
+  }
+  // Submit was pressed and no thank-you showed: the company may have it. Never pressed again on its own.
+  if (afterSubmit && (report.status === "held" || report.status === "failed")) {
+    report.status = "unsure";
+    report.summary = "Submit was pressed but no thank-you page showed. Check your email (and the open tab); then press “I submitted it” or “It didn't go through”.";
+  }
+  const finished = ["ready", "held", "needs_you", "unsure", "submitted", "failed", "canceled"].includes(report.status);
   const set: Partial<typeof applyTasks.$inferInsert> = {
     status: report.status,
+    ...(report.status === "submitting" ? { submitPressedAt: new Date() } : {}),
+    ...(report.pageNote ? { pageNote: report.pageNote.slice(0, 2000) } : {}),
     ...(report.summary !== undefined ? { summary: report.summary.slice(0, 2000) } : {}),
     ...(report.needs ? { needs: report.needs.slice(0, 50).map((s) => s.slice(0, 300)) } : {}),
     ...(report.checks ? { checks: report.checks.slice(0, 80).map((s) => s.slice(0, 300)) } : {}),
@@ -322,6 +358,10 @@ export async function reportTask(id: string, report: TaskReport): Promise<ApplyT
       ? `Submitted the application for ${what}`
       : report.status === "held"
         ? `Held ${what} for your OK`
+        : report.status === "ready"
+          ? `Checked ${what}: ready to send`
+          : report.status === "unsure"
+            ? `Pressed Submit for ${what} but saw no confirmation`
         : report.status === "needs_you"
           ? `${what} needs you${report.needs?.length ? `: ${report.needs.slice(0, 2).join("; ")}` : ""}`
           : report.status === "failed"
@@ -331,12 +371,32 @@ export async function reportTask(id: string, report: TaskReport): Promise<ApplyT
   return row ?? null;
 }
 
-/** Your buttons on the Apply page: approve a held one, try again, cancel, or remove it from the list. */
-export async function actOnTask(id: string, action: "approve" | "retry" | "cancel" | "remove" | "submitted"): Promise<ApplyTask | null> {
+export class TaskActionError extends Error {}
+
+/**
+ * Your buttons on the Apply page: approve a held one, send a checked one, try again, cancel, remove it
+ * from the list, say you submitted it, or (after an unclear Submit) say it didn't go through.
+ */
+export async function actOnTask(id: string, action: TaskAction): Promise<ApplyTask | null> {
   const task = await getTask(id);
   if (!task) return null;
   const what = `${task.title} at ${task.company}`;
-  const said = { approve: `Approved ${what}: it will be submitted`, retry: `Asked Auto apply to try ${what} again`, cancel: `Canceled ${what}`, remove: `Removed ${what} from Auto apply`, submitted: `Marked ${what} as submitted` }[action];
+  // Never a second Submit on its own: after an unclear one only you can say it didn't go through.
+  if (task.status === "unsure" && (action === "retry" || action === "approve" || action === "send")) {
+    throw new TaskActionError(
+      `Submit was already pressed for ${what}, so the company may have it. Check the email for a confirmation, then mark it submitted, or (the owner) choose “It didn't go through” to send it again.`,
+    );
+  }
+  if (action === "send" && task.status !== "ready") throw new TaskActionError(`${what} isn't ready to send (it is ${task.status}).`);
+  const said = {
+    approve: `Approved ${what}: it will be submitted`,
+    retry: `Asked Auto apply to try ${what} again`,
+    cancel: `Canceled ${what}`,
+    remove: `Removed ${what} from Auto apply`,
+    submitted: `Marked ${what} as submitted`,
+    send: `Sent ${what} to be submitted`,
+    reopen: `${what} didn't go through: it will be filled and submitted again`,
+  }[action];
   if (action !== "submitted") await noteActivity({ action: action === "approve" ? "approve_application" : "auto_apply_action", title: said, detail: { taskId: id, action } });
   if (action === "remove") {
     await db.delete(applyTasks).where(eq(applyTasks.id, id));
@@ -360,12 +420,42 @@ export async function actOnTask(id: string, action: "approve" | "retry" | "cance
       url = target.url;
     }
   }
+  // Sending a checked one (or approving it) turns the check into a real application.
+  const send = action === "send" || action === "reopen" || (action === "approve" && task.status === "ready");
   const [row] = await db
     .update(applyTasks)
-    .set({ status: "queued", url, approved: action === "approve", summary: action === "approve" ? "Approved: it will be submitted." : "Waiting to try again.", needs: [], finishedAt: null })
+    .set({
+      status: "queued",
+      url,
+      approved: action === "approve",
+      checkOnly: send ? false : task.checkOnly,
+      ...(action === "reopen" ? { submitPressedAt: null, pageNote: null } : {}),
+      summary: action === "approve" ? "Approved: it will be submitted." : send ? "Waiting to be filled and submitted." : "Waiting to try again.",
+      needs: [],
+      finishedAt: null,
+    })
     .where(eq(applyTasks.id, id))
     .returning();
   return row;
+}
+
+/** Sends every application that was checked and is ready (optionally one batch). */
+export async function sendReady(batchId?: string): Promise<{ sent: { id: string; title: string; company: string }[] }> {
+  const ready = await db
+    .select({ id: applyTasks.id, title: applyTasks.title, company: applyTasks.company })
+    .from(applyTasks)
+    .where(and(eq(applyTasks.status, "ready"), batchId ? eq(applyTasks.batchId, batchId) : undefined));
+  if (!ready.length) return { sent: [] };
+  await db
+    .update(applyTasks)
+    .set({ status: "queued", checkOnly: false, summary: "Waiting to be filled and submitted.", needs: [], finishedAt: null })
+    .where(inArray(applyTasks.id, ready.map((r) => r.id)));
+  await noteActivity({
+    action: "send_ready_applications",
+    title: `Sent ${ready.length} checked application${ready.length === 1 ? "" : "s"} to be submitted (${ready.slice(0, 3).map((r) => r.company).join(", ")}${ready.length > 3 ? "…" : ""})`,
+    detail: { ids: ready.map((r) => r.id) },
+  });
+  return { sent: ready };
 }
 
 /** Open applications per tracked job and found job, for badges in lists. */

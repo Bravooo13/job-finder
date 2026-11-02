@@ -331,7 +331,7 @@ export const applyTasks = sqliteTable(
     company: text("company").notNull(),
     url: text("url").notNull(), // the application form
     status: text("status")
-      .$type<"queued" | "running" | "submitting" | "held" | "needs_you" | "submitted" | "failed" | "canceled">()
+      .$type<"queued" | "running" | "submitting" | "held" | "needs_you" | "submitted" | "failed" | "canceled" | "ready" | "unsure">()
       .notNull()
       .default("queued"),
     // You looked at a held application and said submit it.
@@ -342,6 +342,13 @@ export const applyTasks = sqliteTable(
     answers: text("answers", { mode: "json" }).$type<ApplyTaskAnswer[]>().notNull(),
     by: text("by").notNull().default("you"), // you | agent
     attempts: integer("attempts").notNull().default(0),
+    // Fill and report the questions it can't answer, but never press Submit (Check questions first).
+    checkOnly: integer("check_only", { mode: "boolean" }).notNull().default(false),
+    // When the helper pressed Submit. Set means the company may already have the application:
+    // Auto apply never presses Submit again on its own (no duplicate applications).
+    submitPressedAt: integer("submit_pressed_at", { mode: "timestamp_ms" }),
+    // What the page showed after Submit when there was no thank-you (new fields, a dialog, a message).
+    pageNote: text("page_note"),
     startedAt: integer("started_at", { mode: "timestamp_ms" }),
     finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
     createdAt: createdAt(),

@@ -37,10 +37,13 @@ const enqueueSchema = z
     foundIds: z.array(z.string().max(100)).max(100).optional(),
     urls: z.array(z.string().url()).max(100).optional(),
     by: z.enum(["you", "agent"]).optional(),
+    checkFirst: z.boolean().optional(),
+    force: z.boolean().optional(),
   })
   .refine((b) => (b.jobIds?.length ?? 0) + (b.foundIds?.length ?? 0) + (b.urls?.length ?? 0) > 0, "Give jobIds, foundIds or urls");
 
-// POST /api/apply/auto { jobIds?, foundIds?, urls?, by? }: queue applications. The browser helper picks them up
+// POST /api/apply/auto { jobIds?, foundIds?, urls?, by?, checkFirst?, force? }: queue applications (checkFirst: fill and
+// list the questions without Submit; force: queue Workday and other postings Auto apply can't finish by itself). The browser helper picks them up
 // within half a minute (Chrome must be open with the extension loaded).
 export async function POST(request: Request) {
   const parsed = enqueueSchema.safeParse(await request.json().catch(() => null));

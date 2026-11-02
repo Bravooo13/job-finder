@@ -9,7 +9,7 @@ how he likes to work) is in **`USER.md`** next to this file. It is local only
 (gitignored) because this repo is public. Read it if it exists, and never
 commit personal data: no names, emails, resumes, job lists or database files.
 
-## Status (updated 2026-10-31)
+## Status (updated 2026-11-01)
 
 Shipped in the 2026-10-29 round (list under "Changelog" at the end): job
 classification and Found-jobs filters (industry, role, visa/OPT/CPT/H-1B,
@@ -18,51 +18,60 @@ careers-page grabbing), the Chrome extension (LinkedIn/Handshake grabbing,
 application filling), the Apply page and answer engine, the Compare page, a
 drawn US map, H-1B employer data, an agent JSON API and an MCP server.
 
-2026-10-30: **Auto apply** (Apply → Auto apply, `auto_apply` MCP tool). The
-extension takes queued applications from Job Finder, fills each form in a
-background tab and submits it or holds it by the owner's settings, so applying
-no longer needs an agent driving the browser. Tested end to end on a mock
-Greenhouse form built with real React Select (`tests/e2e/auto_apply_e2e.py`),
-not yet on live sites.
+2026-10-30: **Auto apply** and **one set of actions, two drivers**: every
+capability is an action in `src/lib/control/actions.ts`; the owner runs them
+with the website's buttons, AIs (the in-app Job Finder assistant, the Job
+scout, outside AIs over MCP) run the same actions as tools under **Settings →
+What AI may do**, with **Activity** (Waiting for you, the log, AI spending).
 
-2026-10-30 (later): **one set of actions, two drivers.** Everything Job Finder
-can do is an action in `src/lib/control/actions.ts` (38 of them). The owner runs
-them with the website's buttons; AIs run the same actions as tools: the new
-**Job Finder assistant** (in-app boss agent: every action plus `ask_agent` to
-use the specialists), the Job scout (the finding actions), and outside AIs over
-MCP (the tool list now comes from the app). **Settings → What AI may do** sets
-Do it / Ask me first / Never per group or per action, plus a daily AI spending
-limit (default $5). "Ask me first" steps wait in **Activity → Waiting for you**;
-**Activity** also has the log of who did what and today's AI spending. See
-"Who controls what" below.
+2026-10-31 → 11-01: **first live run** on real Greenhouse forms (Stripe,
+Coinbase, DoorDash, C3.ai, Pinterest). Stripe went through end to end. The run
+drove extension 0.2.1 → 0.2.7 and the answer-engine fixes in the changelog, and
+three safety features: **Check questions first** (fill without Submit, answer
+everything once, then **Send all**), the **Submit lock** (no thank-you after
+Submit → status `unsure` "Sent? Check", never pressed again on its own), and
+**queue-time skips** (Workday and sign-in sites, video/email postings). The
+after-Submit patterns now come from the app (`src/lib/apply/outcome.ts`), so
+most fixes there need no extension reload.
 
 **Needs the owner** (an agent can't do these):
-1. Restart Job Finder once (Ctrl+C in its Terminal window, then double-click
-   `Start Job Finder.command`). The restart installs the new packages
-   (Next.js 15.5.28 security update, map packages) and binds the app to this
-   computer only (127.0.0.1).
-2. Load the extension: `chrome://extensions` → Developer mode → Load unpacked →
-   the `extension/` folder.
-3. Fill **Apply → My answers → Work authorization** (authorized to work, need
-   sponsorship now / later, visa status). Until then every work-authorization
-   question is left blank and flagged red. Nothing is assumed.
-4. Paste a Claude API key in Settings (or pick an Ollama model) for the AI
-   features (written answers, the compare agent, the page-grabbing fallback).
-5. Optional: Settings → H-1B employer history → Download (or upload the CSV
-   from the USCIS Data Hub; USCIS may refuse the download).
-6. Look over **Settings → What AI may do** (everything is "Do it" except
-   approving held applications) and the daily AI limit.
-7. For Auto apply: reload the extension (version 0.2.0 asks for tabs, alarms
-   and debugger permissions), choose the settings on Apply → Auto apply
-   (consent boxes are off until he turns them on), and fill My answers →
-   Standard declarations and the street address/ZIP if forms ask for them.
+1. Reload the extension after each extension change (`chrome://extensions` →
+   the reload arrow on Job Finder Helper). Job Finder shows the running
+   version and warns when it is older than `HELPER_VERSION`
+   (`src/lib/apply/auto-schema.ts`, kept equal to `extension/manifest.json` by
+   a unit test).
+2. Auto apply's **Submit** mode and **Tick consent boxes**: AIs can't change
+   them (the approve group); `reopen` (send again after an unclear Submit) is
+   his call too.
+3. Emailed security codes, CAPTCHAs, sign-ins, video submissions: his.
+4. Confirm `unsure` applications from his email ("I submitted it" / "It didn't
+   go through").
+5. My info gaps forms ask about: willing to relocate, offer deadlines, dates of
+   each past job.
+
+### Working with another AI worker
+
+A second AI can run the whole loop with the MCP tools (or the JSON API) and
+never needs the browser: `job_finder_status` → find and triage
+(`search_found_jobs`, `get_found_job`, `save_found_job`) → `auto_apply` with
+`checkFirst: true` → `auto_apply_status` every few minutes → answer the
+`needs` once (`save_application_answer`, `everyJob` for facts) and `retry` →
+`send_ready_applications` → report `submitted` / `unsure` / `needs_you`. The
+skill `.claude/skills/job-applier/SKILL.md` is the step-by-step. Everything it
+does lands in Activity with its client name; permissions bind it like any AI.
+Two AIs at once is fine: the queue is claimed one application at a time and
+nothing is ever submitted twice on its own.
 
 **Next up** (rough priority):
 - Run the grabbers on the owner's real LinkedIn/Handshake searches and tune the
   extractors (both sites change their markup often).
-- Run Auto apply on real Greenhouse/Lever/Ashby forms and extend
-  `extension/sites/apply.js` and the answer rules where fields are missed.
-  Workday (sign-in, several pages) is reported as "needs you" for now.
+- Run Auto apply on Lever, Ashby and SmartRecruiters forms (Greenhouse is done)
+  and extend `extension/sites/apply.js` and the answer rules where fields are
+  missed. Learn the real page Greenhouse shows after Submit when it asks for an
+  emailed code (`pageNote` on `unsure`/`needs_you` applications records it).
+- Confirm submissions from email: with a Gmail connector, match "Thank you for
+  applying" mails to `unsure` applications.
+- Workday (sign-in, several pages): fill page by page after the owner signs in.
 - Agent skill `job-grabber` (`job-applier` is in `.claude/skills/`).
 - Small-company discovery at scale: a list of target companies → careers pages
   → `grab_page` each (board learning makes later runs automatic).
@@ -352,12 +361,12 @@ without an Origin (curl, the MCP server) and from the extension are allowed.
 | `POST /api/apply/pick` | `{ url/jobId/foundId, fields }` → the AI's answers to choice/short questions from the resume (never legal, visa, EEO or consent questions) |
 | `GET /api/apply/resume?url=/jobId=/foundId=/resumeId=` | Resume PDF for the job: tailored for it → the version for its field (industry versions, `src/lib/apply/resume-pick.ts`) → the uploaded PDF → the master (setting `resume`: match/file/generated); `x-resume-choice` says which |
 | `GET/POST/DELETE /api/apply/resume-file` | The resume PDF uploaded for applications (`?download=1` for the file) |
-| `GET /api/apply/auto?status=&batch=&limit=` | Auto apply's applications, counts, settings, AI and whether the browser helper checked in |
-| `POST /api/apply/auto` | `{ jobIds?, foundIds?, urls?, by? }` → queued and skipped (with reasons) |
-| `GET/PATCH/POST/DELETE /api/apply/auto/:id` | One application; the helper's report; `{ action: approve/retry/cancel/remove/submitted }` |
+| `GET /api/apply/auto?status=&batch=&limit=` | Auto apply's applications, counts, settings, AI and whether the browser helper checked in (with its version) |
+| `POST /api/apply/auto` | `{ jobIds?, foundIds?, urls?, by?, checkFirst?, force? }` → queued and skipped (with reasons: applied, queued, LinkedIn-only, Workday/sign-in, video/email) |
+| `GET/PATCH/POST/DELETE /api/apply/auto/:id` | One application; the helper's report (`pageNote` = what the page showed after Submit); `{ action: approve/retry/cancel/remove/submitted/send/reopen }` (409 for retry/send/approve on `unsure`) |
 | `POST /api/apply/auto/:id/check` | `{ fields, blockers? }` → submit / hold / needs_you by the settings |
 | `POST /api/apply/auto/next` | For the helper: claim the next queued application |
-| `GET/PUT /api/apply/auto/settings` | submit (sure/review/fill/always), consent, essays, aiPick, resume (match/file/generated), coverLetters (required/always/never), pauseSeconds, keepTabs, enabled |
+| `GET/PUT /api/apply/auto/settings` | submit (sure/review/fill/always), consent, essays, aiPick, resume (match/file/generated), coverLetters (required/always/never), pauseSeconds, keepTabs, checkFirst, enabled |
 | `GET /api/apply/cover-letter?url=/jobId=/foundId=/id=` | Latest cover letter as PDF |
 | `POST /api/apply/cover-letter` | `{ url/jobId/foundId, write? }` → the job's letter, or a new one from the Cover letter writer (saved on Cover letters; found jobs are saved to My jobs first) |
 | `POST /api/apply/applied` | `{ url }` or `{ jobId }` (saves a found job first) |
@@ -560,6 +569,35 @@ widths and look for console errors. Extension scripts should pass
   links point at an ATS.
 
 ## Changelog
+
+**2026-11-01**
+- **Check questions first** (setting `checkFirst`, or `checkFirst` when
+  queuing): the helper fills without Submit; complete forms become `ready`
+  ("Ready to send"), the rest `needs_you` with their questions; **Send all**
+  on Apply → Auto apply, `send` per application, MCP `send_ready_applications`.
+- **Submit lock**: `submit_pressed_at` is set when the helper presses Submit;
+  no thank-you afterwards (or the helper stopping) → `unsure` ("Sent? Check"),
+  never retried, sent or approved on its own (409 / refused); the owner
+  confirms (`submitted`) or says it didn't go through (`reopen`, approve
+  group). The check endpoint never answers "submit" for check-only or
+  already-submitted applications.
+- **Queue-time skips** (`queueBlocker` in `src/lib/apply/outcome.ts`):
+  Workday and other sign-in sites, postings asking for a recorded video or an
+  emailed submission (`force` overrides).
+- Extension 0.2.7: after-Submit patterns come from the app with each
+  application (`OUTCOME_PATTERNS`); confirmation addresses count as a
+  thank-you; code pages are found by their input fields too and need a *new*
+  thank-you to be ruled out ("Thank you for your interest" is on many forms
+  from the start); the report carries `pageNote` (dialogs, headings, fields
+  that appeared, messages).
+- Apply → Auto apply: status tiles (Waiting, Ready to send, Needs you, Sent?
+  Check, Submitted), Send all, per-status buttons (Send it, Approve, I
+  submitted it, It didn't go through, Check again), the helper version check.
+  Activity → Waiting for you and the dashboard count `ready` and `unsure`.
+- Answer engine: a lone "I Accept" box and "I understand that … may use AI
+  tools" follow the consent setting.
+- Migration 0007; unit tests `tests/unit/auto.test.ts`; e2e cases for check
+  first, a silent Submit and an emailed-code step.
 
 **2026-10-31**
 - Extension 0.2.1: Fill attaches files first, waits for the form to settle and

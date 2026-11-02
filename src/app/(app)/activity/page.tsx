@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { WAITING_STATUSES } from "@/lib/apply/auto-schema";
 import { ActorBadge } from "@/components/activity/ActorBadge";
-import { WaitingList } from "@/components/activity/WaitingList";
+import { WaitingList, type WaitingTask } from "@/components/activity/WaitingList";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,7 +29,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
   const limit = Math.min(500, Number(q.limit) || 100);
   const [requests, tasks, activity, spend, breakdown, permissions] = await Promise.all([
     listRequests({ status: ["waiting"] }),
-    listTasks({ status: ["held", "needs_you"], limit: 50 }),
+    listTasks({ status: WAITING_STATUSES, limit: 50 }),
     listActivity({ limit, actor }),
     spendStatus(),
     spendBreakdown(),
@@ -45,7 +46,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Waiting for you{waitingTotal ? ` (${waitingTotal})` : ""}</CardTitle>
-              <CardDescription>Steps an AI asked to do (set to &ldquo;Ask me first&rdquo;) and applications Auto apply held for your OK or needs you for.</CardDescription>
+              <CardDescription>Steps an AI asked to do (set to &ldquo;Ask me first&rdquo;) and applications that are checked and ready to send, held for your OK, need you, or may have been sent.</CardDescription>
             </CardHeader>
             <CardContent>
               <WaitingList
@@ -54,7 +55,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
                   id: t.id,
                   title: t.title,
                   company: t.company,
-                  status: t.status as "held" | "needs_you",
+                  status: t.status as WaitingTask["status"],
                   summary: t.summary,
                   needs: t.needs,
                   checks: t.checks,

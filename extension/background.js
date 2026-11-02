@@ -120,10 +120,11 @@ async function input(tabId, op) {
 }
 
 /** Runs a small function in the page through the debugger (works on any site). */
-async function evaluate(tabId, fn) {
+async function evaluate(tabId, fn, arg) {
   if (!(await attach(tabId))) return null;
   try {
-    const r = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", { expression: `(${fn})()`, returnByValue: true, awaitPromise: true });
+    const expression = arg === undefined ? `(${fn})()` : `(${fn})(${JSON.stringify(arg)})`;
+    const r = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     return r?.result?.value ?? null;
   } catch {
     return null;
@@ -184,7 +185,7 @@ async function tick() {
     if (wait > 0) await sleep(Math.min(wait, 25_000));
     const task = res.data.task;
     const tab = await chrome.tabs.create({ url: task.url, active: false });
-    await setState({ task, settings, ai: res.data.ai || { ready: false }, tabId: tab.id, started: Date.now(), phase: "load", redirects: 0 });
+    await setState({ task, settings, ai: res.data.ai || { ready: false }, patterns: res.data.patterns || null, tabId: tab.id, started: Date.now(), phase: "load", redirects: 0 });
   } finally {
     ticking = false;
   }
@@ -230,50 +231,108 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (state?.tabId === tabId && state.phase !== "done") await finish(state, { status: "failed", summary: "The application tab was closed before it finished." });
 });
 
-/** What the page says after Submit: a thank-you, errors, or a CAPTCHA. */
-function outcomeProbe() {
+/**
+ * What the page says after Submit: a thank-you, errors, a CAPTCHA or a code to type. `p` holds the
+ * patterns Job Finder sends with each application (src/lib/apply/outcome.ts), so they can be improved
+ * without reloading the extension; the defaults below are only a fallback.
+ */
+function outcomeProbe(p) {
+  p = p || {};
+  const re = (src, fallback) => {
+    try {
+      return new RegExp(src || fallback, "i");
+    } catch {
+      return new RegExp(fallback, "i");
+    }
+  };
   const text = (document.body && document.body.innerText) || "";
-  const thanks = /thank you for (applying|your application|submitting)|application (has been |was )?(submitted|received)|we('ve| have) received your application|successfully submitted|your application is complete|thanks for applying/i.test(text);
+  const thanks = re(p.thanks, "thank you for (applying|your application|submitting)|application (has been |was )?(submitted|received)|we('ve| have) received your application|thanks for applying").test(text);
+  const thanksUrl = re(p.thanksUrl, "/confirmation|/thanks|/thank-you").test(location.pathname + location.search);
   const visible = (el) => {
     const r = el.getBoundingClientRect();
     const s = getComputedStyle(el);
     return r.width > 40 && r.height > 40 && s.visibility !== "hidden" && s.display !== "none";
   };
+  const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && getComputedStyle(el).display !== "none";
   const captcha = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"], iframe[title*="challenge" i]')].some(visible);
+  const labelOf = (el) =>
+    ((el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText) || el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || el.id || "")
+      .replace(/\s+/g, " ")
+      .trim();
   const errors = [...document.querySelectorAll('[aria-invalid="true"]')]
-    .map((el) => (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText) || el.getAttribute("aria-label") || el.name || "")
+    .map(labelOf)
     // Error lines are short, so only check that they show at all.
-    .concat([...document.querySelectorAll('.error, .error-message, .field-error, [class*="error-text" i], [class*="helper-text--error" i], [role="alert"]')].filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== "hidden").map((e) => e.innerText))
+    .concat([...document.querySelectorAll('.error, .error-message, .field-error, [class*="error-text" i], [class*="helper-text--error" i], [role="alert"]')].filter(shown).map((e) => e.innerText))
     .map((t) => (t || "").replace(/\s+/g, " ").trim())
     .filter((t) => t && t.length < 200);
+  const inputs = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter(shown);
   const fields = document.querySelectorAll("form input:not([type=hidden]), form select, form textarea").length;
   // Greenhouse (and others) may email a security code to confirm it's you before accepting the application.
-  const code = /(security|verification|confirmation) code|enter the (\d+[- ]character )?code|we('ve| have) (sent|emailed) (you )?(a|an) .{0,30}code/i.test(text);
-  return { thanks, captcha, code, errors: [...new Set(errors)].slice(0, 8), fields, url: location.href };
+  let codeBox = false;
+  try {
+    codeBox = [...document.querySelectorAll(p.codeInput || 'input[autocomplete="one-time-code"]')].some(shown);
+  } catch {
+    codeBox = false;
+  }
+  const code = codeBox || re(p.code, "(security|verification|confirmation) code|enter the code").test(text);
+  // A short account of what's on screen: dialogs, alerts and headings.
+  const note = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"], [role="alert"], [role="status"], h1, h2, h3')]
+    .filter(shown)
+    .map((e) => e.innerText.replace(/\s+/g, " ").trim())
+    .filter((t) => t && t.length < 300)
+    .slice(0, 6)
+    .join(" · ");
+  return {
+    thanks,
+    thanksUrl,
+    captcha,
+    code,
+    errors: [...new Set(errors)].slice(0, 8),
+    fields,
+    inputs: inputs.map((el) => `${el.id || el.name || ""}|${labelOf(el)}`).slice(0, 200),
+    note: note.slice(0, 600),
+    url: location.href,
+  };
 }
 
 async function submitAndWatch(state, result) {
   await report(state.task.id, { status: "submitting", summary: "Pressing Submit…", answers: result.answers, checks: result.checks });
   state = { ...state, phase: "submit" };
   await setState(state);
-  const before = await evaluate(state.tabId, outcomeProbe);
+  const probe = () => evaluate(state.tabId, outcomeProbe, state.patterns || null);
+  const before = await probe();
   const clicked = result.submit && (await input(state.tabId, { kind: "click", x: result.submit.x, y: result.submit.y })).ok;
   if (!clicked) await evaluate(state.tabId, () => document.querySelector("[data-jf-submit]")?.click());
   let last = null;
+  // Fields that appeared after Submit (a code box, a new question).
+  const newFields = (now) => (now?.inputs || []).filter((k) => !(before?.inputs || []).includes(k)).map((k) => k.split("|")[1] || k.split("|")[0]).filter(Boolean);
+  const pageNote = (now) => {
+    if (!now) return undefined;
+    const parts = [];
+    if (now.note) parts.push(now.note);
+    const added = newFields(now);
+    if (added.length) parts.push(`New fields: ${added.slice(0, 5).join(", ")}`);
+    if (now.errors.length) parts.push(`Messages: ${now.errors.slice(0, 3).join("; ")}`);
+    if (before && now.url !== before.url) parts.push(`Address: ${now.url.split("?")[0]}`);
+    return parts.join(" · ").slice(0, 1200) || undefined;
+  };
   for (let i = 0; i < 30; i++) {
     await sleep(1500);
-    const now = await evaluate(state.tabId, outcomeProbe);
+    const now = await probe();
     if (!now) continue; // navigating
     last = now;
     const moved = before && now.url !== before.url;
-    if ((now.thanks && (!before?.thanks || moved)) || (moved && now.fields === 0 && !now.errors.length)) {
+    if ((now.thanks && (!before?.thanks || moved)) || (moved && now.thanksUrl) || (moved && now.fields === 0 && !now.errors.length)) {
       return finish(state, { status: "submitted", summary: "Submitted. Marked applied in Job Finder.", url: before?.url, answers: result.answers, checks: result.checks });
     }
-    if (now.code && !now.thanks) {
+    // Many forms say "Thank you for your interest" from the start, so only a new thank-you counts.
+    const newThanks = now.thanks && !before?.thanks;
+    if (now.code && !newThanks && (!before?.code || newFields(now).length)) {
       return finish(state, {
         status: "needs_you",
         summary: "The site emailed you a code to confirm the application. Type it in the open tab and press Submit, then mark it submitted here.",
         needs: ["Type the code the site emailed you and press Submit"],
+        pageNote: pageNote(now),
         answers: result.answers,
         checks: result.checks,
       });
@@ -283,6 +342,7 @@ async function submitAndWatch(state, result) {
         status: "needs_you",
         summary: "The site asked for a CAPTCHA after Submit. Solve it in the open tab and press Submit, then mark it submitted here.",
         needs: ["Solve the CAPTCHA and press Submit"],
+        pageNote: pageNote(now),
         answers: result.answers,
         checks: result.checks,
       });
@@ -292,15 +352,18 @@ async function submitAndWatch(state, result) {
         status: "needs_you",
         summary: `The form wasn't accepted: ${now.errors.slice(0, 3).join("; ")}`,
         needs: now.errors,
+        pageNote: pageNote(now),
         answers: result.answers,
         checks: result.checks,
       });
     }
   }
+  // No thank-you, no code, no error: Job Finder records it as "Sent? Check" and never presses Submit again on its own.
   return finish(state, {
     status: "held",
-    summary: "Pressed Submit but didn't see a confirmation. Check the open tab; if it went through, press “I submitted it”.",
-    needs: last?.errors?.length ? last.errors : [],
+    summary: "Pressed Submit but didn't see a confirmation. Check the open tab and your email; if it went through, press “I submitted it”.",
+    needs: [],
+    pageNote: pageNote(last),
     answers: result.answers,
     checks: result.checks,
   });

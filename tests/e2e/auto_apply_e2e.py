@@ -55,8 +55,10 @@ st, g = api("POST", "/api/grab", {"source": "web", "by": "agent", "jobs": [
     {"url": "https://job-boards.greenhouse.io/e2eco/jobs/777", "title": "Data Analyst Intern", "company": "E2E Co", "location": "Chicago, IL"},
     {"url": "https://job-boards.greenhouse.io/e2eco/jobs/779", "title": "Data Science Intern", "company": "E2E Co", "location": "Chicago, IL",
      "description": "Build data pipelines and models for our analytics team. Python and SQL. Summer 2027 in Chicago."},
+    {"url": "https://job-boards.greenhouse.io/e2eco/jobs/781", "title": "Data Engineer Intern", "company": "E2E Co", "location": "Chicago, IL"},
+    {"url": "https://job-boards.greenhouse.io/e2eco/jobs/783", "title": "Business Analyst Intern", "company": "E2E Co", "location": "Chicago, IL"},
     {"url": "https://www.linkedin.com/jobs/view/4999999999/", "title": "Analyst", "company": "LinkedIn Only Co", "location": "Chicago, IL"}]})
-check(st == 200 and g["added"] == 3, f"test jobs added ({g})")
+check(st == 200 and g["added"] == 5, f"test jobs added ({g})")
 found = {j["title"]: j["id"] for j in api("GET", "/api/found?q=E2E%20Co&status=all")[1]["jobs"]}
 li = api("GET", "/api/found?q=LinkedIn%20Only&status=all")[1]["jobs"][0]["id"]
 
@@ -179,6 +181,29 @@ async def main():
         check("Last spring I rebuilt" in (submits[-1].get("text", {}).get("question_8") or ""), "the cover letter went into the form")
         st, again = api("POST", "/api/apply/auto", {"foundIds": [found["Data Science Intern"]]})
         check(not again["queued"] and "Already applied" in again["skipped"][0]["reason"], f"an applied job isn't queued again ({again['skipped']})")
+        # 4. Check questions first: filled without Submit, ready; then sent. The site shows nothing after
+        #    Submit, so it is "Sent? Check": never pressed again on its own until you say.
+        n_before = len(submits)
+        st, q = api("POST", "/api/apply/auto", {"foundIds": [found["Business Analyst Intern"]], "checkFirst": True})
+        tid4 = q["queued"][0]["id"]
+        t = await run(tid4)
+        print("   4:", t["status"], "|", t["summary"])
+        check(t["status"] == "ready" and len(submits) == n_before, "checked first: ready, nothing sent")
+        st, _ = api("POST", f"/api/apply/auto/{tid4}", {"action": "send"})
+        t = await run(tid4, timeout=200)
+        print("   4b:", t["status"], "|", t["summary"], "|", t.get("pageNote"))
+        check(t["status"] == "unsure" and len(submits) == n_before + 1, f"no thank-you after Submit → unsure ({t['status']})")
+        st, r = api("POST", f"/api/apply/auto/{tid4}", {"action": "retry"})
+        check(st == 409, f"an unsure application can't be retried ({st}: {r})")
+        st, r = api("POST", f"/api/apply/auto/{tid4}", {"action": "submitted"})
+        check(st == 200 and r["status"] == "submitted", "you confirm it went through")
+        # 5. A code the site emailed: needs you, with the page noted.
+        st, q = api("POST", "/api/apply/auto", {"foundIds": [found["Data Engineer Intern"]]})
+        tid5 = q["queued"][0]["id"]
+        t = await run(tid5, timeout=200)
+        print("   5:", t["status"], "|", t["needs"], "|", t.get("pageNote"))
+        check(t["status"] == "needs_you" and any("code" in n for n in t["needs"]), f"the emailed code is asked for ({t['needs']})")
+        check("Security code" in (t.get("pageNote") or ""), f"the new code field is noted ({t.get('pageNote')})")
         check(not errors, f"no page errors {errors[:3]}")
         await ctx.close()
 

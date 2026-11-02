@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAiStatus } from "@/lib/ai/settings";
 import { getAutoSettings, getResumeFile, helperLastSeen, listTasks, openTasksFor } from "@/lib/apply/auto";
+import { OPEN_STATUSES, WAITING_STATUSES } from "@/lib/apply/auto-schema";
 import { getApplyProfile } from "@/lib/apply/profile";
 import { applyQueue } from "@/lib/apply/queue";
 
@@ -25,10 +26,10 @@ export default async function ApplyPage({ searchParams }: { searchParams: Promis
   ]);
   const open = await openTasksFor({ jobIds: items.map((i) => i.id) });
   const autoByJob = Object.fromEntries(
-    open.filter((t) => t.jobId && ["queued", "running", "submitting", "held", "needs_you"].includes(t.status)).map((t) => [t.jobId!, { status: t.status, summary: t.summary }]),
+    open.filter((t) => t.jobId && (OPEN_STATUSES as string[]).includes(t.status)).map((t) => [t.jobId!, { status: t.status, summary: t.summary }]),
   );
   const seen = helperLastSeen();
-  const waiting = (list.counts.held ?? 0) + (list.counts.needs_you ?? 0);
+  const waiting = WAITING_STATUSES.reduce((n, st) => n + (list.counts[st] ?? 0), 0);
   return (
     <>
       <PageHeader
@@ -41,7 +42,7 @@ export default async function ApplyPage({ searchParams }: { searchParams: Promis
             <ListChecks className="size-4" /> To apply ({items.length})
           </TabsTrigger>
           <TabsTrigger value="auto" className="gap-1.5">
-            <Bot className="size-4" /> Auto apply{waiting ? ` (${waiting} need you)` : ""}
+            <Bot className="size-4" /> Auto apply{waiting ? ` (${waiting} for you)` : ""}
           </TabsTrigger>
           <TabsTrigger value="answers" className="gap-1.5">
             <MessageSquareText className="size-4" /> My answers

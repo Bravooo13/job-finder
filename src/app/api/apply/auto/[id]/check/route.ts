@@ -20,5 +20,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const task = await getTask((await params).id);
   if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const settings = await getAutoSettings();
-  return NextResponse.json(decideSubmit(settings.submit, parsed.data.fields, { approved: task.approved, blockers: parsed.data.blockers }));
+  const decision = decideSubmit(settings.submit, parsed.data.fields, { approved: task.approved, blockers: parsed.data.blockers });
+  // Check questions first: never Submit; a complete form comes back as ready to send.
+  if (task.checkOnly && decision.action === "submit") return NextResponse.json({ ...decision, action: "hold", summary: "Checked: every required question has an answer. Ready to send." });
+  // Submit was already pressed once: never again on its own.
+  if (task.submitPressedAt && decision.action === "submit") return NextResponse.json({ ...decision, action: "hold", summary: "Submit was already pressed once; waiting for you." });
+  return NextResponse.json(decision);
 }

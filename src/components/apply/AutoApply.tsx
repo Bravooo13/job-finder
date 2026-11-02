@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Check, CheckCircle2, ExternalLink, FileUp, Loader2, Play, RotateCcw, Send, Trash2, TriangleAlert, X } from "lucide-react";
+import { Bot, Check, CheckCircle2, ExternalLink, FileUp, Loader2, MailCheck, Play, RotateCcw, Send, Trash2, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -14,7 +14,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { CLAUDE_MODELS } from "@/lib/ai/models";
 import { helperInstalled, startHelperNow } from "@/lib/apply/auto-client";
-import { SUBMIT_MODES, SUBMIT_MODE_LABELS, TASK_STATUS_LABELS, type AutoApplySettings, type TaskStatus } from "@/lib/apply/auto-schema";
+import {
+  HELPER_VERSION,
+  olderVersion,
+  SUBMIT_MODES,
+  SUBMIT_MODE_LABELS,
+  TASK_STATUS_HINTS,
+  TASK_STATUS_LABELS,
+  type AutoApplySettings,
+  type TaskAction,
+  type TaskStatus,
+} from "@/lib/apply/auto-schema";
 import type { ApplyTaskAnswer } from "@/lib/db/schema";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -30,6 +40,8 @@ export interface AutoTask {
   checks: string[];
   answers: ApplyTaskAnswer[];
   jobId: string | null;
+  pageNote?: string | null;
+  checkOnly?: boolean;
   updatedAt: Date | string | number;
 }
 
@@ -43,18 +55,40 @@ export interface AutoState {
 }
 
 const VIEWS: { id: string; label: string; statuses: TaskStatus[] }[] = [
-  { id: "you", label: "Needs you", statuses: ["needs_you", "held"] },
+  { id: "you", label: "For you", statuses: ["ready", "held", "needs_you", "unsure"] },
   { id: "active", label: "In progress", statuses: ["queued", "running", "submitting"] },
   { id: "done", label: "Submitted", statuses: ["submitted"] },
+  { id: "other", label: "Didn't work", statuses: ["failed", "canceled"] },
   { id: "all", label: "All", statuses: [] },
 ];
+
+/** The numbers across the top: each one opens its list. */
+const TILES: { status: TaskStatus; view: string }[] = [
+  { status: "queued", view: "active" },
+  { status: "ready", view: "you" },
+  { status: "needs_you", view: "you" },
+  { status: "unsure", view: "you" },
+  { status: "submitted", view: "done" },
+];
+
+const SAID: Record<TaskAction, string> = {
+  approve: "Approved: it will be submitted",
+  retry: "Queued again",
+  cancel: "Canceled",
+  remove: "Removed",
+  submitted: "Marked as submitted and applied",
+  send: "Sent: it will be filled and submitted",
+  reopen: "It will be filled and submitted again",
+};
 
 const STATUS_STYLE: Record<TaskStatus, string> = {
   queued: "bg-muted text-muted-foreground",
   running: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
   submitting: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
+  ready: "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200",
   held: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
   needs_you: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200",
+  unsure: "bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-200",
   submitted: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
   failed: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200",
   canceled: "bg-muted text-muted-foreground",
@@ -76,7 +110,8 @@ function Toggle({ id, label, hint, checked, onChange }: { id: string; label: str
 
 export function AutoApply({ initial }: { initial: AutoState }) {
   const [state, setState] = useState<AutoState>(initial);
-  const [view, setView] = useState(initial.counts.needs_you || initial.counts.held ? "you" : initial.counts.queued || initial.counts.running ? "active" : "all");
+  const forYou = (c: AutoState["counts"]) => (c.needs_you ?? 0) + (c.held ?? 0) + (c.ready ?? 0) + (c.unsure ?? 0);
+  const [view, setView] = useState(forYou(initial.counts) ? "you" : initial.counts.queued || initial.counts.running ? "active" : "all");
   const [busy, setBusy] = useState<string | null>(null);
   const [installed, setInstalled] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -99,15 +134,27 @@ export function AutoApply({ initial }: { initial: AutoState }) {
     if (!res.ok) toast.error((await res.json()).error ?? "Couldn't save");
   }
 
-  async function act(id: string, action: "approve" | "retry" | "cancel" | "remove" | "submitted") {
+  async function act(id: string, action: TaskAction) {
     setBusy(id);
     const res = await fetch(`/api/apply/auto/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action }) });
     setBusy(null);
     if (!res.ok) return void toast.error((await res.json()).error ?? "Couldn't do that");
-    if (action === "approve" || action === "retry") startHelperNow();
-    toast.success(
-      { approve: "Approved: it will be submitted", retry: "Queued again", cancel: "Canceled", remove: "Removed", submitted: "Marked as submitted and applied" }[action],
-    );
+    if (["approve", "retry", "send", "reopen"].includes(action)) startHelperNow();
+    toast.success(SAID[action]);
+    refresh();
+  }
+
+  async function sendAllReady() {
+    setBusy("ready");
+    const ids = state.tasks.filter((t) => t.status === "ready").map((t) => t.id);
+    let sent = 0;
+    for (const id of ids) {
+      const res = await fetch(`/api/apply/auto/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "send" }) });
+      if (res.ok) sent++;
+    }
+    setBusy(null);
+    startHelperNow();
+    toast.success(`Sent ${sent} application${sent === 1 ? "" : "s"}: they are filled and submitted one by one`);
     refresh();
   }
 
@@ -125,6 +172,8 @@ export function AutoApply({ initial }: { initial: AutoState }) {
   }
 
   const s = state.settings;
+  const outdated = Boolean(state.helper.version && olderVersion(state.helper.version, HELPER_VERSION));
+  const readyCount = state.counts.ready ?? 0;
   const shown = state.tasks.filter((t) => {
     const v = VIEWS.find((x) => x.id === view)!;
     return !v.statuses.length || v.statuses.includes(t.status);
@@ -143,11 +192,19 @@ export function AutoApply({ initial }: { initial: AutoState }) {
         </CardHeader>
         <CardContent className="grid gap-2 text-sm">
           <p className="flex items-center gap-2">
-            {state.helper.running ? <CheckCircle2 className="size-4 text-emerald-600" /> : <TriangleAlert className="size-4 text-amber-600" />}
+            {state.helper.running && !outdated ? <CheckCircle2 className="size-4 shrink-0 text-emerald-600" /> : <TriangleAlert className="size-4 shrink-0 text-amber-600" />}
             {state.helper.running ? (
-              <span suppressHydrationWarning>Browser helper is running (checked in {timeAgo(new Date(state.helper.lastSeen!))}).</span>
+              outdated ? (
+                <span>
+                  The browser helper is version {state.helper.version}; this Job Finder needs {HELPER_VERSION}. Open chrome://extensions and press the reload arrow on Job Finder Helper.
+                </span>
+              ) : (
+                <span suppressHydrationWarning>
+                  Browser helper {state.helper.version ? `${state.helper.version} ` : ""}is running (checked in {timeAgo(new Date(state.helper.lastSeen!))}).
+                </span>
+              )
             ) : installed
-                ? "The browser helper is installed but hasn't checked in. Reload it on chrome://extensions (version 0.2.0 or newer), and keep Auto apply on in its popup."
+                ? `The browser helper is installed but hasn't checked in. Reload it on chrome://extensions (version ${HELPER_VERSION}), and keep Auto apply on in its popup.`
                 : "The browser helper isn't running. Load the extension (Browser helper tab), and keep Chrome open while it works."}
           </p>
           <p className="flex items-center gap-2">
@@ -180,9 +237,35 @@ export function AutoApply({ initial }: { initial: AutoState }) {
       <Card>
         <CardHeader>
           <CardTitle>Applications</CardTitle>
-          <CardDescription>What Auto apply did with each job. Approve the ones waiting for your OK, or finish the ones that need you in their tab.</CardDescription>
+          <CardDescription>
+            What Auto apply did with each job. Send the checked ones, approve the ones waiting for your OK, answer what it needs, and confirm the ones
+            where Submit was pressed without a thank-you page (check your email).
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {TILES.map((tile) => (
+              <button
+                key={tile.status}
+                onClick={() => setView(tile.view)}
+                title={TASK_STATUS_HINTS[tile.status]}
+                className="rounded-lg border p-3 text-left transition-colors hover:bg-accent"
+              >
+                <span className="block text-2xl font-semibold tabular-nums">{state.counts[tile.status] ?? 0}</span>
+                <span className="block text-xs text-muted-foreground">{TASK_STATUS_LABELS[tile.status]}</span>
+              </button>
+            ))}
+          </div>
+          {readyCount ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-violet-300 bg-violet-50 p-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-violet-900 dark:bg-violet-950/40">
+              <p>
+                {readyCount} checked application{readyCount === 1 ? " is" : "s are"} ready: every required question has an answer.
+              </p>
+              <Button size="sm" onClick={sendAllReady} disabled={busy === "ready"}>
+                {busy === "ready" ? <Loader2 className="animate-spin" /> : <Send />} Send all {readyCount}
+              </Button>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Show">
             {VIEWS.map((v) => {
               const n = v.statuses.length ? v.statuses.reduce((a, st) => a + (state.counts[st] ?? 0), 0) : state.tasks.length;
@@ -229,7 +312,11 @@ export function AutoApply({ initial }: { initial: AutoState }) {
                           {timeAgo(new Date(t.updatedAt))}
                         </span>
                       </div>
-                      {t.summary ? <p className="text-sm">{t.summary}</p> : null}
+                      <p className="text-sm">{t.summary || TASK_STATUS_HINTS[t.status]}</p>
+                      {t.status === "unsure" && t.pageNote ? (
+                        <p className="rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">After Submit the page showed: {t.pageNote}</p>
+                      ) : null}
+                      {t.checkOnly && ["queued", "running"].includes(t.status) ? <p className="text-xs text-muted-foreground">Checking the questions only: it won&apos;t be sent.</p> : null}
                       {t.needs.length && (t.status === "needs_you" || t.status === "held") ? (
                         <div className="text-sm">
                           <p className="font-medium text-red-700 dark:text-red-400">Only you can do:</p>
@@ -269,10 +356,25 @@ export function AutoApply({ initial }: { initial: AutoState }) {
                       ) : null}
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-1.5">
+                      {t.status === "ready" ? (
+                        <Button size="sm" onClick={() => act(t.id, "send")} disabled={busy === t.id}>
+                          {busy === t.id ? <Loader2 className="animate-spin" /> : <Send />} Send it
+                        </Button>
+                      ) : null}
                       {t.status === "held" ? (
                         <Button size="sm" onClick={() => act(t.id, "approve")} disabled={busy === t.id}>
                           {busy === t.id ? <Loader2 className="animate-spin" /> : <Check />} Approve and submit
                         </Button>
+                      ) : null}
+                      {t.status === "unsure" ? (
+                        <>
+                          <Button size="sm" onClick={() => act(t.id, "submitted")} disabled={busy === t.id}>
+                            {busy === t.id ? <Loader2 className="animate-spin" /> : <MailCheck />} I submitted it
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => act(t.id, "reopen")} disabled={busy === t.id}>
+                            <RotateCcw /> It didn&apos;t go through
+                          </Button>
+                        </>
                       ) : null}
                       {t.url.startsWith("http") && t.status !== "submitted" ? (
                         <Button size="sm" variant="outline" asChild>
@@ -281,15 +383,15 @@ export function AutoApply({ initial }: { initial: AutoState }) {
                           </a>
                         </Button>
                       ) : null}
+                      {["ready", "held", "needs_you", "failed"].includes(t.status) ? (
+                        <Button size="sm" variant="outline" onClick={() => act(t.id, "retry")} disabled={busy === t.id}>
+                          <RotateCcw /> {t.status === "ready" ? "Check again" : "Try again"}
+                        </Button>
+                      ) : null}
                       {["held", "needs_you", "failed"].includes(t.status) ? (
-                        <>
-                          <Button size="sm" variant="outline" onClick={() => act(t.id, "retry")} disabled={busy === t.id}>
-                            <RotateCcw /> Try again
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => act(t.id, "submitted")} disabled={busy === t.id}>
-                            <Send /> I submitted it
-                          </Button>
-                        </>
+                        <Button size="sm" variant="outline" onClick={() => act(t.id, "submitted")} disabled={busy === t.id}>
+                          <MailCheck /> I submitted it
+                        </Button>
                       ) : null}
                       {t.status === "queued" ? (
                         <Button size="sm" variant="outline" onClick={() => act(t.id, "cancel")} disabled={busy === t.id}>
@@ -332,6 +434,14 @@ export function AutoApply({ initial }: { initial: AutoState }) {
               ))}
             </RadioGroup>
           </div>
+
+          <Toggle
+            id="auto-check-first"
+            label="Check questions first"
+            hint="New applications are filled without pressing Submit. Each one comes back “Ready to send” or with the questions it couldn't answer, so you answer everything in one go, then press Send all."
+            checked={s.checkFirst}
+            onChange={(v) => saveSettings({ checkFirst: v })}
+          />
 
           <Toggle
             id="auto-consent"
@@ -455,7 +565,7 @@ export function AutoApply({ initial }: { initial: AutoState }) {
           <Toggle
             id="auto-tabs"
             label="Leave forms that need me open in a tab"
-            hint="So you can finish them where they are. Off: the tab closes and you open it from here."
+            hint="So you can finish them where they are. Off: the tab closes and you open it from here. A tab where Submit was pressed without a thank-you page always stays open."
             checked={s.keepTabs}
             onChange={(v) => saveSettings({ keepTabs: v })}
           />

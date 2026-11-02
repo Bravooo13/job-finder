@@ -84,6 +84,8 @@ export default async function DashboardPage() {
                   waiting.requests ? `${waiting.requests} step${waiting.requests === 1 ? "" : "s"} an AI asked to do` : "",
                   waiting.held ? `${waiting.held} application${waiting.held === 1 ? "" : "s"} held for your OK` : "",
                   waiting.needsYou ? `${waiting.needsYou} application${waiting.needsYou === 1 ? "" : "s"} needing you` : "",
+                  waiting.ready ? `${waiting.ready} checked and ready to send` : "",
+                  waiting.unsure ? `${waiting.unsure} sent? check your email` : "",
                 ]
                   .filter(Boolean)
                   .join(" · ")}

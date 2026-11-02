@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { claimNext, getAutoSettings } from "@/lib/apply/auto";
 import { getAiStatus } from "@/lib/ai/settings";
+import { OUTCOME_PATTERNS } from "@/lib/apply/outcome";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,5 +14,6 @@ export async function POST(request: Request) {
   const settings = await getAutoSettings();
   if (!task) return NextResponse.json({ task: null, settings });
   const ai = await getAiStatus();
-  return NextResponse.json({ task, settings, ai: { ready: ai.ready } });
+  // patterns: how to read the page after Submit (kept here so they improve without an extension reload).
+  return NextResponse.json({ task, settings, ai: { ready: ai.ready }, patterns: OUTCOME_PATTERNS });
 }

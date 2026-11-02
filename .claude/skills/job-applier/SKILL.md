@@ -30,8 +30,11 @@ spending against his daily limit, permissions), then `auto_apply_status` with
 `limit: 5` (or `GET /api/apply/auto?limit=5`). Look at:
 
 - `helper.running`: false means Chrome isn't open with the Job Finder Helper
-  (version 0.2.0 or newer) loaded and switched on. Queued applications wait until
-  it is. Tell the owner; don't try to work around it.
+  loaded and switched on. Queued applications wait until it is. Tell the owner;
+  don't try to work around it.
+- `helper.upToDate`: false means the owner must press the reload arrow on
+  Job Finder Helper in `chrome://extensions` (`helper.note` says which version).
+  Fixes to the helper only take effect after that.
 - `settings.submit`: `sure` (default: submits only when every answer came from
   My answers, holds the rest), `review` (always waits for the owner's OK),
   `fill` (fills, never submits), `always`.
@@ -50,9 +53,10 @@ contact details are empty, say which ones; applications will stop on them.
   Read promising ones with `get_found_job`. Skip citizens-only, senior or
   "5+ years" roles, and anything the owner ruled out.
 - Prefer jobs with a company application link (Greenhouse, Lever, Ashby,
-  SmartRecruiters and similar). LinkedIn-only and Handshake-only jobs are
-  skipped by Auto apply until the company's own link is known. Workday needs the
-  owner to sign in, so those come back `needs_you`.
+  SmartRecruiters and similar). Skipped when queued, with the reason: jobs with
+  only a LinkedIn/Handshake link, Workday and other sign-in sites (Taleo, iCIMS,
+  SuccessFactors…), and postings that want a recorded video or an emailed
+  submission. Don't pass `force` unless the owner asks; those can't finish alone.
 - Respect limits a company states (West Monroe, for one, allows 3 applications
   in 30 days). Don't queue several roles at one company without asking.
 
@@ -75,10 +79,24 @@ yourself and hand them over with `save_cover_letter` and
 OK). A field's resume: `get_resume`, tailor, then `make_resume_version` with
 your `latex`.
 
-## 4. Queue them (one call)
+## 4. Queue them: check first, then send
 
-`auto_apply` with `foundIds`, `jobIds` or `urls`. Keep the `batchId`. The reply
-says what was queued and what was skipped and why.
+For a new batch, queue with `checkFirst: true` (the owner may also have the
+**Check questions first** setting on). The helper fills each form **without
+pressing Submit** and reports it as:
+
+- `ready`: every required question has an answer.
+- `needs_you`: the questions it couldn't answer, in `needs`.
+
+Collect every `needs` across the batch and settle them in **one round**: facts
+from My info, the resume or what the owner told you go in with
+`save_application_answer` (`everyJob: true` for facts that hold for every form;
+the job's `url` for one job); ask the owner only for what remains, all at once.
+Then `retry` those to re-check them. When they are `ready`, `send_ready_applications`
+(with the `batchId`) sends them to be filled and submitted by his settings.
+
+Without `checkFirst`, `auto_apply` fills and submits straight away. Either way
+keep the `batchId`; the reply says what was queued and what was skipped and why.
 
 ## 5. Follow up
 
@@ -86,7 +104,15 @@ Each application takes about one to three minutes, plus the pause between them
 in the settings. Check `auto_apply_status` with the `batchId` every few minutes,
 not in a tight loop. Then report, grouped by status:
 
-- **submitted**: done, and already marked applied in My jobs.
+- **submitted**: done (a thank-you page was seen), and already marked applied in
+  My jobs.
+- **unsure** ("Sent? Check"): Submit was pressed but no thank-you page showed.
+  The company may have it, so Job Finder **never presses Submit again on its
+  own**: `retry`, `send` and `approve` are refused. Show the `pageNote` (what the
+  page showed) and ask the owner to check his email. When he confirms it went
+  through, `auto_apply_action` `submitted`. Only he can say it didn't go through
+  (`reopen`, which asks him first).
+- **ready**: checked, not sent yet; see step 4.
 - **held**: waiting for the owner's OK. Show the `checks` (answers that were
   guessed or written by the AI). He approves them in Activity → Waiting for
   you or on Apply → Auto apply. Only when he says yes in the conversation for
@@ -96,6 +122,9 @@ not in a tight loop. Then report, grouped by status:
   X?"): if the answer is in My info, the resume or something the owner told you,
   save it once with `save_application_answer` and `everyJob: true`, then `retry`.
   Otherwise ask him; he can also answer them in Activity → Waiting for you.
+- **needs_you** "Type the code the site emailed you": Greenhouse and others
+  email a code before they accept the application. The tab stays open; the
+  owner types the code and presses Submit, then it's `submitted`.
 - **needs_you**: show `needs` exactly (a street address, a transcript upload,
   a consent box, a CAPTCHA, a sign-in). The form is usually left open in a tab.
   When the owner has fixed My answers or uploaded the file, `retry`. If the owner
@@ -104,8 +133,11 @@ not in a tight loop. Then report, grouped by status:
 
 ## Rules
 
-- Never type a password, create an account, solve a CAPTCHA, or tick consent
-  boxes yourself. Auto apply does only what the owner switched on.
+- Never type a password, create an account, solve a CAPTCHA, type an emailed
+  code, or tick consent boxes yourself. Auto apply does only what the owner
+  switched on.
+- Never queue the same job twice to "make sure": an `unsure` application may
+  already be with the company.
 - Answers come from My answers and the resume. If the same check keeps coming up
   (for example "related to an employee?"), suggest the owner set it once in
   Apply → My answers → Standard declarations.

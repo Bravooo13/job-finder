@@ -1,13 +1,14 @@
 "use client";
 
-import { Check, ChevronDown, ExternalLink, Loader2, X } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Loader2, MailCheck, RotateCcw, Send, X } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { answerAndRetry, approveHeldApplication, decideAiRequest } from "@/lib/control/server-actions";
+import { TASK_STATUS_HINTS, type TaskAction } from "@/lib/apply/auto-schema";
+import { actOnApplication, answerAndRetry, decideAiRequest } from "@/lib/control/server-actions";
 import type { Actor } from "@/lib/control/shared";
 import { timeAgo } from "@/lib/utils";
 import { ActorBadge } from "./ActorBadge";
@@ -26,7 +27,7 @@ export interface WaitingTask {
   id: string;
   title: string;
   company: string;
-  status: "held" | "needs_you";
+  status: "ready" | "held" | "needs_you" | "unsure";
   summary: string | null;
   needs: string[];
   checks: string[];
@@ -120,8 +121,28 @@ function AnswerOnce({ t, onDone }: { t: WaitingTask; onDone: () => void }) {
   );
 }
 
+const TASK_BUTTONS: Record<WaitingTask["status"], { action: TaskAction; label: string; icon: typeof Check; variant?: "outline"; done: string }[]> = {
+  ready: [{ action: "send", label: "Send it", icon: Send, done: "Sent: the browser helper submits it next" }],
+  held: [{ action: "approve", label: "Approve", icon: Check, done: "Approved: the browser helper submits it next" }],
+  needs_you: [],
+  unsure: [
+    { action: "submitted", label: "I submitted it", icon: MailCheck, done: "Marked submitted and applied" },
+    { action: "reopen", label: "It didn't go through", icon: RotateCcw, variant: "outline", done: "It will be filled and submitted again" },
+  ],
+};
+
 function TaskItem({ t, onDone }: { t: WaitingTask; onDone: () => void }) {
   const [pending, start] = useTransition();
+  const [which, setWhich] = useState<TaskAction | null>(null);
+  const act = (b: (typeof TASK_BUTTONS)[WaitingTask["status"]][number]) => {
+    setWhich(b.action);
+    start(async () => {
+      const r = await actOnApplication(t.id, b.action);
+      if (!r.ok) return void toast.error(r.error);
+      toast.success(b.done);
+      onDone();
+    });
+  };
   return (
     <li className="grid gap-2 rounded-lg border p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -129,29 +150,14 @@ function TaskItem({ t, onDone }: { t: WaitingTask; onDone: () => void }) {
           <p className="text-sm font-medium">
             {t.title} <span className="font-normal text-muted-foreground">at {t.company}</span>
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t.status === "held" ? "Auto apply filled it and holds it for your OK" : "Auto apply needs you"}
-            {t.summary ? `: ${t.summary}` : ""}
-          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t.summary || TASK_STATUS_HINTS[t.status]}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          {t.status === "held" ? (
-            <Button
-              size="sm"
-              disabled={pending}
-              aria-label={`Approve the application to ${t.company}`}
-              onClick={() =>
-                start(async () => {
-                  const r = await approveHeldApplication(t.id);
-                  if (!r.ok) toast.error(r.error);
-                  else toast.success("Approved: the browser helper submits it next");
-                  onDone();
-                })
-              }
-            >
-              {pending ? <Loader2 className="animate-spin" /> : <Check />} Approve
+          {TASK_BUTTONS[t.status].map((b) => (
+            <Button key={b.action} size="sm" variant={b.variant} disabled={pending} aria-label={`${b.label}: ${t.company}`} onClick={() => act(b)}>
+              {pending && which === b.action ? <Loader2 className="animate-spin" /> : <b.icon />} {b.label}
             </Button>
-          ) : null}
+          ))}
           {/^https?:/.test(t.url) ? (
             <Button size="sm" variant="outline" asChild>
               <a href={t.url} target="_blank" rel="noreferrer">

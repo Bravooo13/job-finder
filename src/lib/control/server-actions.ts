@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import type { ActionResult } from "@/lib/action-result";
-import { actOnTask } from "@/lib/apply/auto";
+import { actOnTask, sendReady, TaskActionError } from "@/lib/apply/auto";
+import type { TaskAction } from "@/lib/apply/auto-schema";
 import { rememberGlobalAnswer } from "@/lib/apply/profile";
 import { noteActivity } from "./log";
 import { decideRequest } from "./run";
@@ -45,9 +46,26 @@ export async function decideAiRequest(id: string, decision: "approve" | "decline
 
 /** Your OK for an application Auto apply held (same as Approve on Apply → Auto apply). */
 export async function approveHeldApplication(id: string): Promise<ActionResult> {
-  const task = await actOnTask(id, "approve");
+  return actOnApplication(id, "approve");
+}
+
+/** Any of your buttons on an Auto apply application (send, I submitted it, it didn't go through…). */
+export async function actOnApplication(id: string, action: TaskAction): Promise<ActionResult> {
+  try {
+    const task = await actOnTask(id, action);
+    refresh();
+    return task ? { ok: true, data: null } : { ok: false, error: "That application is gone" };
+  } catch (e) {
+    if (e instanceof TaskActionError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+/** Sends every checked application that is ready. */
+export async function sendReadyApplications(batchId?: string): Promise<ActionResult<number>> {
+  const r = await sendReady(batchId);
   refresh();
-  return task ? { ok: true, data: null } : { ok: false, error: "That application is gone" };
+  return { ok: true, data: r.sent.length };
 }
 
 /**
@@ -57,7 +75,13 @@ export async function approveHeldApplication(id: string): Promise<ActionResult> 
 export async function answerAndRetry(taskId: string, answers: { question: string; answer: string }[]): Promise<ActionResult<number>> {
   const given = answers.filter((a) => a.question.trim() && a.answer.trim());
   for (const a of given) await rememberGlobalAnswer(a.question, a.answer);
-  const task = await actOnTask(taskId, "retry");
+  let task;
+  try {
+    task = await actOnTask(taskId, "retry");
+  } catch (e) {
+    if (e instanceof TaskActionError) return { ok: false, error: e.message };
+    throw e;
+  }
   refresh();
   revalidatePath("/me");
   return task ? { ok: true, data: given.length } : { ok: false, error: "That application is gone" };
