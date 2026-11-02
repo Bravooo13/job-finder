@@ -1,82 +1,82 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { after, test } from "node:test";
-import { readFileSync } from "node:fs";
-import { HELPER_VERSION, olderVersion } from "@/lib/apply/auto-schema";
-import { OUTCOME_PATTERNS, queueBlocker } from "@/lib/apply/outcome";
+import { test } from "node:test";
+import { applicationUrl } from "@/lib/apply/apply-url";
+import { pickResumeVersion } from "@/lib/apply/resume-pick";
+import { autoApplySettingsSchema } from "@/lib/apply/auto-schema";
+import { decideSubmit } from "@/lib/apply/decide";
+import { applyProfileSchema, onlyProvided } from "@/lib/apply/profile-schema";
 
-process.env.DATABASE_URL = `file:${path.join(mkdtempSync(path.join(tmpdir(), "jf-auto-")), "test.db")}`;
+const sure = [
+  { label: "First Name*", required: true, filled: true, value: "Alex", confidence: "high" as const },
+  { label: "Will you require sponsorship?*", required: true, filled: true, value: "Yes", confidence: "high" as const },
+  { label: "Cover letter", required: false, filled: false },
+];
 
-test("the expected helper version matches the extension", () => {
-  const manifest = JSON.parse(readFileSync(path.join(process.cwd(), "extension", "manifest.json"), "utf8"));
-  assert.equal(manifest.version, HELPER_VERSION);
-  assert.ok(olderVersion("0.2.5", "0.2.7"));
-  assert.ok(!olderVersion("0.2.7", "0.2.7"));
-  assert.ok(!olderVersion("0.3.0", "0.2.9"));
+test("submit only when every answer is sure (the default)", () => {
+  assert.equal(decideSubmit("sure", sure).action, "submit");
+  const guessed = [...sure, { label: "Do you have research experience?", required: true, filled: true, value: "Yes", confidence: "medium" as const, ai: true }];
+  const held = decideSubmit("sure", guessed);
+  assert.equal(held.action, "hold");
+  assert.equal(held.checks.length, 1);
+  assert.match(held.checks[0], /research experience.*Yes \(AI\)/);
+  assert.equal(decideSubmit("sure", guessed, { approved: true }).action, "submit", "you approved it");
+  assert.equal(decideSubmit("always", guessed).action, "submit");
+  assert.equal(decideSubmit("review", sure).action, "hold");
+  assert.equal(decideSubmit("fill", sure, { approved: true }).action, "hold", "fill only never submits");
 });
 
-test("postings Auto apply can't finish are skipped when queued", () => {
-  assert.match(queueBlocker("https://hpe.wd5.myworkdayjobs.com/Jobsathpe/job/X_1") ?? "", /Workday/);
-  assert.match(queueBlocker("https://jobs.example.taleo.net/careers/1") ?? "", /sign in/);
-  assert.match(queueBlocker("https://job-boards.greenhouse.io/x/jobs/1", "REQUIRED: In a 60–90 second video, tell us about a time you used data. Send this to recruiting@example.com") ?? "", /video/);
-  assert.match(queueBlocker("https://jobs.lever.co/x/1", "To apply, email your resume and portfolio to jobs@example.com") ?? "", /email/);
-  assert.equal(queueBlocker("https://job-boards.greenhouse.io/x/jobs/1", "Questions? Email accommodations@example.com. We love video games."), null);
+test("required blanks, unticked consent and blockers need you", () => {
+  const d = decideSubmit("always", [
+    ...sure,
+    { label: "Postal Code:*", required: true, filled: false },
+    { label: "I certify that the information is true*", required: true, filled: false, consent: true },
+    { label: "Transcript", type: "file", required: true, filled: false },
+  ]);
+  assert.equal(d.action, "needs_you");
+  assert.deepEqual(d.needs, ["Postal Code:", "Tick: I certify that the information is true", "Attach: Transcript"]);
+  assert.equal(decideSubmit("sure", sure, { blockers: ["A CAPTCHA"] }).action, "needs_you");
 });
 
-test("the after-Submit patterns read real pages", () => {
-  const re = (s: string) => new RegExp(s, "i");
-  assert.ok(re(OUTCOME_PATTERNS.thanks).test("Thank you for applying to Stripe!"));
-  assert.ok(re(OUTCOME_PATTERNS.thanksUrl).test("/stripe/jobs/123/confirmation"));
-  assert.ok(re(OUTCOME_PATTERNS.code).test("Enter the 8-character code we sent to your email"));
-  assert.ok(re(OUTCOME_PATTERNS.code).test("Security code"));
-  assert.ok(!re(OUTCOME_PATTERNS.code).test("Zip code"));
+test("application links: Greenhouse's own form, Lever and Ashby apply pages, job sites refused", () => {
+  assert.deepEqual(applicationUrl({ url: "https://job-boards.greenhouse.io/westmonroe5/jobs/6167540004" }), {
+    url: "https://job-boards.greenhouse.io/embed/job_app?for=westmonroe5&token=6167540004",
+  });
+  assert.deepEqual(applicationUrl({ url: "https://westmonroe.com/careers/job-details-students?gh_jid=6167540004", provider: "greenhouse", boardToken: "westmonroe5" }), {
+    url: "https://job-boards.greenhouse.io/embed/job_app?for=westmonroe5&token=6167540004",
+  });
+  assert.deepEqual(applicationUrl({ url: "https://boards.greenhouse.io/acme/jobs/123456" }), { url: "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=123456" });
+  const lever = "https://jobs.lever.co/acme/0b5c2a8e-1111-2222-3333-444455556666";
+  assert.deepEqual(applicationUrl({ url: lever }), { url: `${lever}/apply` });
+  assert.deepEqual(applicationUrl({ url: `${lever}/apply` }), { url: `${lever}/apply` });
+  const ashby = "https://jobs.ashbyhq.com/acme/0b5c2a8e-1111-2222-3333-444455556666";
+  assert.deepEqual(applicationUrl({ url: ashby }), { url: `${ashby}/application` });
+  assert.ok("error" in applicationUrl({ url: "https://www.linkedin.com/jobs/view/4458972577/" }));
+  assert.deepEqual(applicationUrl({ url: "https://www.linkedin.com/jobs/view/1/", applyUrl: "https://acme.wd5.myworkdayjobs.com/Careers/job/X_R1" }), {
+    url: "https://acme.wd5.myworkdayjobs.com/Careers/job/X_R1",
+  });
 });
 
-test("check first, the Submit lock and sending ready applications", async () => {
-  const { enqueueApplications, reportTask, actOnTask, getTask, sendReady, TaskActionError } = await import("@/lib/apply/auto");
-  const q = await enqueueApplications({ urls: ["https://job-boards.greenhouse.io/embed/job_app?for=acme&token=1", "https://acme.wd1.myworkdayjobs.com/x/job/1"], checkFirst: true });
-  assert.equal(q.queued.length, 1);
-  assert.match(q.skipped[0].reason, /Workday/);
-  const id = q.queued[0].id;
-  assert.equal((await getTask(id))?.checkOnly, true);
-
-  // A checked form with every answer comes back ready, not held.
-  await reportTask(id, { status: "running" });
-  let t = await reportTask(id, { status: "held", summary: "Filled", checks: ["Why us?: …"] });
-  assert.equal(t?.status, "ready");
-  assert.match(t?.summary ?? "", /Ready to send/);
-
-  // Sending it turns the check into a real application.
-  const sent = await sendReady();
-  assert.equal(sent.sent.length, 1);
-  t = await getTask(id);
-  assert.equal(t?.status, "queued");
-  assert.equal(t?.checkOnly, false);
-
-  // Submit pressed, no thank-you: unsure, never retried on its own.
-  await reportTask(id, { status: "running" });
-  await reportTask(id, { status: "submitting" });
-  assert.ok((await getTask(id))?.submitPressedAt);
-  t = await reportTask(id, { status: "held", pageNote: "New fields: Security code" });
-  assert.equal(t?.status, "unsure");
-  assert.equal(t?.pageNote, "New fields: Security code");
-  await assert.rejects(() => actOnTask(id, "retry"), TaskActionError);
-  await assert.rejects(() => actOnTask(id, "approve"), TaskActionError);
-
-  // The owner says it didn't go through: it goes again, lock cleared.
-  t = await actOnTask(id, "reopen");
-  assert.equal(t?.status, "queued");
-  assert.equal(t?.submitPressedAt, null);
-
-  // Or he confirms it went through.
-  await reportTask(id, { status: "running" });
-  await reportTask(id, { status: "submitting" });
-  await reportTask(id, { status: "failed", summary: "Tab closed" });
-  assert.equal((await getTask(id))?.status, "unsure", "a failure after Submit is unsure too");
-  t = await actOnTask(id, "submitted");
-  assert.equal(t?.status, "submitted");
+test("a partial save keeps the answers and settings it doesn't send", () => {
+  const sent = { email: "new@example.edu" };
+  const kept = onlyProvided(applyProfileSchema.partial().parse(sent), sent);
+  assert.deepEqual(kept, { email: "new@example.edu" }, "no blank authorizedToWork, visaStatus…");
+  const s = { consent: true };
+  assert.deepEqual(onlyProvided(autoApplySettingsSchema.partial().parse(s), s), { consent: true });
 });
 
-after(() => setTimeout(() => process.exit(), 50).unref());
+test("resume versions: the one for the job's field", () => {
+  const versions = [
+    { id: "ds", title: "Resume – Data science & analytics", industry: "Data science & analytics" },
+    { id: "de", title: "Data engineering resume", industry: "Data engineering" },
+    { id: "q", title: "Resume – Quantitative research & trading", industry: "Quantitative research & trading" },
+    { id: "ec", title: "Resume – Economic consulting", industry: "Economic consulting" },
+  ];
+  assert.equal(pickResumeVersion(versions, { title: "Data Engineering Intern", roleType: "software" })?.version.id, "de");
+  assert.equal(pickResumeVersion(versions, { title: "Data Scientist Intern, Summer 2027", roleType: "data-science" })?.version.id, "ds");
+  assert.equal(pickResumeVersion(versions, { title: "Quantitative Trader Intern", roleType: "quant", industry: "quant" })?.version.id, "q");
+  assert.equal(
+    pickResumeVersion(versions, { title: "Analyst Intern", roleType: "consulting", industry: "consulting", description: "Economic and financial consulting for litigation" })?.version.id,
+    "ec",
+  );
+  assert.equal(pickResumeVersion(versions, { title: "Marketing Coordinator", roleType: "marketing" }), null, "nothing fits → your main resume");
+});

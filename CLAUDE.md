@@ -596,7 +596,7 @@ widths and look for console errors. Extension scripts should pass
   Activity → Waiting for you and the dashboard count `ready` and `unsure`.
 - Answer engine: a lone "I Accept" box and "I understand that … may use AI
   tools" follow the consent setting.
-- Migration 0007; unit tests `tests/unit/auto.test.ts`; e2e cases for check
+- Migration 0007; unit tests `tests/unit/auto-safety.test.ts`; e2e cases for check
   first, a silent Submit and an emailed-code step.
 
 **2026-10-31**
