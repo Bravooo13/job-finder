@@ -47,7 +47,16 @@ function ready(): Promise<void> {
   return globalForDb.jobFinderMigrating;
 }
 
-const migrated = ready();
+ready();
+
+// New migration files can arrive while the app runs (an update without a restart):
+// look at the journal again every few seconds, before queries.
+let checkedAt = Date.now();
+function migrated(): Promise<void> {
+  if (Date.now() - checkedAt < 5000 && globalForDb.jobFinderMigrating) return globalForDb.jobFinderMigrating;
+  checkedAt = Date.now();
+  return ready();
+}
 
 // Every query waits for the migrations above.
 const GATED = new Set(["execute", "batch", "transaction", "executeMultiple"]);
@@ -57,7 +66,7 @@ const gatedClient = new Proxy(client, {
     if (typeof value !== "function") return value;
     if (typeof prop === "string" && GATED.has(prop)) {
       return async (...args: unknown[]) => {
-        await migrated;
+        await migrated();
         return (value as (...a: unknown[]) => unknown).apply(target, args);
       };
     }
