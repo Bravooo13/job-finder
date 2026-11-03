@@ -1,0 +1,5 @@
+# Python 3.10+
+playwright==1.47.0
+selenium==4.25.0
+PyYAML==6.0.2
+pytest==8.3.3

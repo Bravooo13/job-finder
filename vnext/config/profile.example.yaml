@@ -1,0 +1,85 @@
+# Your standard application answers ("My info"). Copied to private/profile.yaml by `python -m jobfinder init`
+# (or filled by `import-v1`). private/ is gitignored: never commit the filled-in copy.
+# yes/no fields take "yes", "no" or "" (empty = not set: the form waits for you). Dates: YYYY-MM or YYYY-MM-DD.
+
+# Contact
+firstName: ""
+middleName: ""
+lastName: ""
+preferredName: ""
+pronouns: ""
+email: ""
+phone: ""
+street: ""
+street2: ""
+city: ""
+state: ""          # full name, e.g. Illinois
+zip: ""
+country: "United States"
+linkedin: ""
+github: ""
+website: ""
+dateOfBirth: ""     # only used when a form asks
+
+# Education (current or most recent first)
+school: ""
+degree: ""          # "M.S." -> also matches "Master's Degree", "Master of Science"
+major: ""
+gpa: ""
+schoolStart: ""     # YYYY-MM
+graduation: ""      # YYYY-MM
+previousSchool: ""
+previousDegree: ""
+previousMajor: ""
+previousStart: ""
+previousGraduation: ""
+
+# Work (latest job)
+currentEmployer: ""
+currentTitle: ""
+
+# Work authorization (answered exactly; see skills/application-answers)
+authorizedToWork: ""        # legally authorized to work in the US
+needsSponsorshipNow: ""     # sponsorship needed to START this job (F-1 on CPT/OPT: no)
+needsSponsorshipLater: ""   # sponsorship needed in the future, e.g. H-1B (F-1: yes)
+visaStatus: ""              # e.g. "F-1 student (CPT/OPT)"
+citizenship: ""
+usCitizen: ""
+permanentResident: ""
+hasClearance: ""
+usPerson: ""                # export control (ITAR/EAR) "U.S. person"
+over18: "yes"
+
+# Where and how
+preferredLocations: ""      # "Chicago, IL; New York, NY; Remote" in order
+workArrangement: ""         # any | onsite | hybrid | remote
+willingToRelocate: ""
+willingToTravel: ""
+
+# Availability and pay
+startDate: ""
+availability: ""            # "Summer 2027 (June to August)"
+salaryExpectation: ""
+hearAbout: "LinkedIn"
+
+# Voluntary self-identification (empty = "I don't wish to answer")
+gender: ""
+hispanicLatino: ""
+race: ""
+veteran: ""
+disability: ""
+
+languages: ""               # "English; Chinese (Mandarin)"
+workedHereBefore: ""
+
+# Standard declarations (not set = "No", held for you to check)
+relatedToEmployee: ""
+restrictiveAgreement: ""
+clientRelationship: ""
+textMessages: ""            # text/WhatsApp updates (not set = no)
+offerDeadline: ""
+
+# Your own questions and answers, reused for the same question in other words
+custom: []
+#  - question: "Are you planning on attending NeurIPS in person this year?"
+#    answer: "No"
