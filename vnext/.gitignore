@@ -1,0 +1,9 @@
+# Everything personal: profile, resume, database, browser sign-ins, dashboard output
+private/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local copy of skills/ for Claude Code
+.claude/

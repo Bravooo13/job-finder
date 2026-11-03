@@ -1,0 +1,8 @@
+# What to look for. Each posting gets the best score over these searches (0-100).
+searches:
+  - name: Data science internships
+    titles: ["Data Science Intern", "Data Scientist Intern", "Machine Learning Intern", "Data Analyst Intern", "Quantitative Analyst Intern"]
+    keywords: ["python", "sql", "machine learning", "statistics", "pandas", "scikit-learn", "r", "tableau"]
+    levels: [internship, entry]
+    locations: ["Chicago, IL", "New York, NY", "Remote"]
+    include_remote: true

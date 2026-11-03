@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Finder dashboard</title>
+<style>
+:root { --bg:#f7f7f5; --card:#fff; --text:#1f1f1d; --muted:#6b6a65; --line:#e4e2dc; --accent:#3c5bd6; --good:#1e7a4f; --warn:#a15c07; --bad:#b42318; --chip:#f0efea; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#161615; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a19a; --line:#34332f; --accent:#8aa2ff; --good:#5cc99a; --warn:#e3a54a; --bad:#f08a80; --chip:#2a2926; } }
+:root[data-theme="dark"] { --bg:#161615; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a19a; --line:#34332f; --accent:#8aa2ff; --good:#5cc99a; --warn:#e3a54a; --bad:#f08a80; --chip:#2a2926; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width:1180px; margin:0 auto; padding:24px 16px 64px; }
+header { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:20px; }
+h1 { font-size:24px; margin:0; } h2 { font-size:17px; margin:0 0 12px; }
+.muted { color:var(--muted); font-size:13px; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:22px; }
+.tile { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; cursor:pointer; text-align:left; color:inherit; font:inherit; }
+.tile:hover { border-color:var(--accent); }
+.tile b { display:block; font-size:26px; font-variant-numeric:tabular-nums; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:18px; }
+.bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; align-items:center; }
+input, select { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+input[type=search] { flex:1; min-width:180px; } select { max-width:100%; }
+.table { width:100%; border-collapse:collapse; font-size:14px; }
+.table th { text-align:left; color:var(--muted); font-weight:500; border-bottom:1px solid var(--line); padding:6px 8px; white-space:nowrap; }
+.table td { border-bottom:1px solid var(--line); padding:8px; vertical-align:top; }
+.wrap { overflow-x:auto; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+.chip { display:inline-block; padding:1px 8px; border-radius:999px; background:var(--chip); font-size:12px; white-space:nowrap; }
+.good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+ul.needs { margin:4px 0 0; padding-left:18px; color:var(--bad); font-size:13px; }
+.empty { color:var(--muted); padding:16px 0; text-align:center; }
+@media (max-width:640px) { .hide-sm { display:none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Job Finder</h1>
+    <span class="muted" id="generated"></span>
+  </header>
+  <section class="tiles" id="tiles" aria-label="Counts"></section>
+
+  <section class="card" aria-labelledby="apps-h">
+    <h2 id="apps-h">Applications</h2>
+    <div class="bar">
+      <select id="app-status" aria-label="Status"><option value="">All statuses</option></select>
+      <input type="search" id="app-q" placeholder="Search company or title" aria-label="Search applications">
+    </div>
+    <div class="wrap"><table class="table"><thead><tr><th>Status</th><th>Job</th><th class="hide-sm">What's next</th><th class="hide-sm">Updated</th></tr></thead><tbody id="apps"></tbody></table></div>
+  </section>
+
+  <section class="card" aria-labelledby="jobs-h">
+    <h2 id="jobs-h">Found jobs</h2>
+    <div class="bar">
+      <select id="job-visa" aria-label="Visa"><option value="">Any visa status</option><option value="friendly">Visa-friendly (sponsors, OPT/CPT, not stated)</option><option value="sponsors">Sponsors</option><option value="opt_cpt">OPT/CPT OK</option><option value="no_sponsorship">No sponsorship</option><option value="citizens_only">Citizens only</option></select>
+      <select id="job-status" aria-label="Job status"><option value="">Any</option><option value="new">New</option><option value="saved">Saved</option><option value="applied">Applied</option></select>
+      <label class="muted">Min score <input type="number" id="job-min" min="0" max="100" value="0" style="width:70px"></label>
+      <input type="search" id="job-q" placeholder="Search title, company, place" aria-label="Search jobs">
+    </div>
+    <div class="wrap"><table class="table"><thead><tr><th>Score</th><th>Job</th><th class="hide-sm">Where</th><th>Visa</th><th class="hide-sm">Platform</th></tr></thead><tbody id="jobs"></tbody></table></div>
+    <p class="muted" id="jobs-count"></p>
+  </section>
+
+  <section class="card" aria-labelledby="act-h">
+    <h2 id="act-h">Activity</h2>
+    <div id="activity"></div>
+  </section>
+</main>
+<script>
+const DATA = /*__DATA__*/null;
+const D = DATA || { generated: "no data yet: run `python -m jobfinder dashboard`", labels: {}, jobs: [], applications: [], activity: [] };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const ago = (t) => { if (!t) return ""; const s = (Date.now() / 1000 - t); return s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+const tone = { submitted: "good", ready: "good", needs_you: "bad", unsure: "warn", held: "warn", failed: "bad" };
+const visaTone = { sponsors: "good", opt_cpt: "good", no_sponsorship: "bad", citizens_only: "bad" };
+const visaLabel = { sponsors: "Sponsors", opt_cpt: "OPT/CPT OK", unknown: "Not stated", no_sponsorship: "No sponsorship", citizens_only: "Citizens only" };
+$("generated").textContent = `Updated ${D.generated_at ? new Date(D.generated_at * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : D.generated}`;
+
+const count = (st) => D.applications.filter((a) => a.status === st).length;
+const tiles = [
+  ["Found jobs", D.jobs.length, () => { $("job-status").value = ""; drawJobs(); $("jobs-h").scrollIntoView({ behavior: "smooth" }); }],
+  ["Saved", D.jobs.filter((j) => j.status === "saved").length, () => { $("job-status").value = "saved"; drawJobs(); $("jobs-h").scrollIntoView({ behavior: "smooth" }); }],
+  ...["queued", "ready", "needs_you", "unsure", "submitted"].map((st) => [D.labels[st] || st, count(st), () => { $("app-status").value = st; drawApps(); $("apps-h").scrollIntoView({ behavior: "smooth" }); }]),
+];
+$("tiles").innerHTML = tiles.map(([l, n], i) => `<button class="tile" data-i="${i}"><b>${n}</b><span class="muted">${esc(l)}</span></button>`).join("");
+$("tiles").querySelectorAll(".tile").forEach((b) => b.addEventListener("click", () => tiles[b.dataset.i][2]()));
+
+for (const [k, v] of Object.entries(D.labels)) $("app-status").insertAdjacentHTML("beforeend", `<option value="${k}">${esc(v)}</option>`);
+function drawApps() {
+  const st = $("app-status").value, q = $("app-q").value.toLowerCase();
+  const rows = D.applications.filter((a) => (!st || a.status === st) && (!q || `${a.company} ${a.title}`.toLowerCase().includes(q)));
+  $("apps").innerHTML = rows.length ? rows.map((a) => `<tr>
+    <td><span class="chip ${tone[a.status] || ""}">${esc(D.labels[a.status] || a.status)}</span>${a.check_only ? ' <span class="chip">check only</span>' : ""}</td>
+    <td><a href="${esc(a.url)}" target="_blank" rel="noreferrer">${esc(a.title)}</a><div class="muted">${esc(a.company)}</div></td>
+    <td class="hide-sm">${(a.needs || []).length && /^needs you/i.test(a.summary || "") ? "Answer these:" : esc(a.summary || "")}${(a.needs || []).length ? `<ul class="needs">${a.needs.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}${a.page_note ? `<div class="muted">Page: ${esc(a.page_note)}</div>` : ""}</td>
+    <td class="hide-sm muted">${ago(a.updated_at)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">No applications${st ? " with this status" : " yet"}.</td></tr>`;
+}
+function drawJobs() {
+  const visa = $("job-visa").value, st = $("job-status").value, min = Number($("job-min").value) || 0, q = $("job-q").value.toLowerCase();
+  const rows = D.jobs.filter((j) => (!st || j.status === st) && (j.score || 0) >= min && (!q || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q))
+    && (!visa || (visa === "friendly" ? ["sponsors", "opt_cpt", "unknown"].includes(j.visa) : j.visa === visa)));
+  $("jobs").innerHTML = rows.slice(0, 400).map((j) => `<tr>
+    <td style="font-variant-numeric:tabular-nums">${j.score ?? ""}</td>
+    <td><a href="${esc(j.url)}" target="_blank" rel="noreferrer">${esc(j.title)}</a><div class="muted">${esc(j.company)}${j.status && j.status !== "new" ? ` · ${esc(j.status)}` : ""}</div></td>
+    <td class="hide-sm">${esc(j.location || "")}</td>
+    <td><span class="chip ${visaTone[j.visa] || ""}" title="${esc(j.visa_note || "")}">${esc(visaLabel[j.visa] || "Not stated")}</span></td>
+    <td class="hide-sm muted">${esc(j.platform || "")}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">No jobs match.</td></tr>`;
+  $("jobs-count").textContent = `${rows.length} of ${D.jobs.length} jobs${rows.length > 400 ? " (first 400 shown)" : ""}`;
+}
+["app-status", "app-q"].forEach((id) => $(id).addEventListener("input", drawApps));
+["job-visa", "job-status", "job-min", "job-q"].forEach((id) => $(id).addEventListener("input", drawJobs));
+$("activity").innerHTML = D.activity.length ? `<table class="table"><tbody>${D.activity.map((x) => `<tr><td class="muted" style="white-space:nowrap">${ago(x.at)}</td><td><span class="chip">${esc(x.who)}</span></td><td>${esc(x.title)}</td></tr>`).join("")}</tbody></table>` : `<p class="empty">Nothing yet.</p>`;
+drawApps(); drawJobs();
+</script>
+</body>
+</html>

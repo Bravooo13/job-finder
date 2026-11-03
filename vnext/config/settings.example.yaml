@@ -1,0 +1,8 @@
+# How applying behaves. Copied to private/settings.yaml by `python -m jobfinder init`.
+submit: sure          # sure = submit only when every answer came from your profile; review = always hold;
+                      # fill = fill and stop; always = submit whenever every required field has an answer
+consent: false        # tick consent / "I certify" boxes for you (read a few forms' text before turning on)
+check_first: true     # new applications are filled without Submit first; send them with `send-ready`
+pause_seconds: 20     # between applications, to stay at a human pace
+driver: playwright    # playwright | selenium
+headless: false       # keep a visible window: you finish what needs you (codes, CAPTCHAs, sign-ins) there
