@@ -26,6 +26,9 @@ everything below), `private/profile.yaml`, the resume, and the full job descript
   the profile (for example "I'm on an F-1 visa and eligible for CPT/OPT").
 
 ## Output
-Save the text to `private/files/cover-letter-{JOB_ID}.md` and a PDF as
-`private/files/cover-letter-{JOB_ID}.pdf` (the apply runner attaches it for that job). Show the
-owner the letter before it is sent, unless he said otherwise.
+Write the letter body (greeting to sign-off, no letterhead: the PDF adds name, contact and date) to
+a file, then run `python -m jobfinder letter JOB_ID FILE.md`. It saves
+`private/files/cover-letter-{JOB_ID}.md` and `.pdf` (the apply runner attaches it for that job only)
+and retries the application that was waiting for it. `python -m jobfinder letters` lists the jobs
+waiting; `letters --show JOB_ID` prints the posting. Show the owner the letter first only if he
+asked to (`private/USER.md` says how he wants it).

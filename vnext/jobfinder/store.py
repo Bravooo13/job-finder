@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -43,7 +44,23 @@ create table if not exists boards (
   key text primary key, platform text not null, token text not null, host text, site text, name text, origin text, added_at real
 );
 create index if not exists applications_status on applications(status);
+create table if not exists h1b (
+  company_key text primary key, name text, fiscal_year integer, initial_approvals integer default 0,
+  total_approvals integer default 0, denials integer default 0, naics text, state text, city text
+);
+create table if not exists job_events (
+  id integer primary key autoincrement, job_id text not null, at real, status text, note text
+);
+create index if not exists job_events_job on job_events(job_id);
 """
+# Columns added after the first release; db() adds any that an older database lacks.
+JOB_COLUMNS = {"industry": "text", "role_type": "text", "job_type": "text", "workplace": "text", "years": "integer",
+               "pay": "text", "company_key": "text", "class_version": "integer default 0", "note": "text"}
+# My jobs, after applying: the tracker.
+TRACK = ["new", "saved", "applied", "interview", "offer", "rejected", "withdrawn", "dismissed"]
+TRACK_LABELS = {"new": "New", "saved": "Saved", "applied": "Applied", "interview": "Interviewing", "offer": "Offer",
+                "rejected": "Rejected", "withdrawn": "Withdrew", "dismissed": "Dismissed"}
+_migrated = False
 
 
 @contextmanager
@@ -51,7 +68,16 @@ def db() -> Iterator[sqlite3.Connection]:
     config.ensure_private()
     con = sqlite3.connect(config.DB_PATH)
     con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
+    global _migrated
+    if not _migrated:
+        con.executescript(SCHEMA)
+        have = {r[1] for r in con.execute("pragma table_info(jobs)")}
+        for col, typ in JOB_COLUMNS.items():
+            if col not in have:
+                con.execute(f"alter table jobs add column {col} {typ}")
+        con.execute("create index if not exists jobs_company_key on jobs(company_key)")
+        con.commit()
+        _migrated = True
     try:
         yield con
         con.commit()
@@ -101,9 +127,125 @@ def jobs(where: str = "1=1", args: tuple = (), order: str = "score desc, created
         return [_row(r) for r in con.execute(f"select * from jobs where {where} order by {order} limit ?", (*args, limit))]
 
 
-def set_job_status(job_id: str, status: str) -> None:
+def set_job_status(job_id: str, status: str, note: Optional[str] = None, at: Optional[float] = None) -> None:
+    """Sets a job's status; a change (or a note) is kept in its history (job_events)."""
+    now = time.time()
     with db() as con:
-        con.execute("update jobs set status=?, updated_at=? where id=?", (status, time.time(), job_id))
+        old = con.execute("select status from jobs where id=?", (job_id,)).fetchone()
+        if old is None:
+            raise KeyError(job_id)
+        con.execute("update jobs set status=?, updated_at=? where id=?", (status, now, job_id))
+        if old["status"] != status or note:
+            con.execute("insert into job_events(job_id, at, status, note) values (?,?,?,?)", (job_id, at or now, status, note))
+
+
+def add_note(job_id: str, note: str, at: Optional[float] = None) -> None:
+    with db() as con:
+        con.execute("insert into job_events(job_id, at, status, note) values (?,?,null,?)", (job_id, at or time.time(), note))
+
+
+def job_events(job_ids: Optional[list[str]] = None) -> list[dict[str, Any]]:
+    with db() as con:
+        if job_ids is None:
+            return [dict(r) for r in con.execute("select * from job_events order by at")]
+        out = []
+        for i in range(0, len(job_ids), 500):
+            chunk = job_ids[i:i + 500]
+            out += [dict(r) for r in con.execute(f"select * from job_events where job_id in ({','.join('?' * len(chunk))}) order by at", chunk)]
+        return out
+
+
+def find_job(text: str) -> list[dict[str, Any]]:
+    """A job by id, else jobs you're tracking (saved or later) whose company or title contains the text."""
+    rows = jobs("id=?", (text,), limit=1)
+    if rows:
+        return rows
+    like = f"%{text}%"
+    return jobs("status not in ('new','dismissed') and (company like ? or title like ?)", (like, like), order="updated_at desc", limit=10)
+
+
+# ------------------------------------------------------------ classification and H-1B data
+
+def reclassify(force: bool = False) -> int:
+    """Classifies jobs saved before the current rules (industry, role type, job type, workplace, years, pay)."""
+    from . import classify
+
+    with db() as con:
+        naics = {r["company_key"]: r["naics"] for r in con.execute("select company_key, naics from h1b where naics is not null")}
+        rows = con.execute("select id, title, company, location, description from jobs" + ("" if force else " where coalesce(class_version,0) < ?"),
+                           () if force else (classify.CLASS_VERSION,)).fetchall()
+        for r in rows:
+            key = classify.company_key(r["company"])
+            c = classify.full(r["title"] or "", r["company"] or "", r["location"] or "", r["description"] or "", naics.get(key))
+            con.execute("update jobs set industry=?, role_type=?, job_type=?, workplace=?, years=?, pay=?, company_key=?, class_version=? where id=?",
+                        (c["industry"], c["role_type"], c["job_type"], c["workplace"], c["years"], c["pay"], c["company_key"], classify.CLASS_VERSION, r["id"]))
+        return len(rows)
+
+
+def import_h1b(path: str) -> dict[str, Any]:
+    """Imports a USCIS H-1B Employer Data Hub file (any year's CSV). Keeps the newest year per employer;
+    several files (years) can be imported one after another."""
+    import csv
+
+    from . import classify
+
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
+        rd = csv.reader(fh)
+        header = [h.strip().lower() for h in next(rd)]
+        col = lambda rx: next((i for i, h in enumerate(header) if re.search(rx, h)), -1)  # noqa: E731
+        i_name, i_year, i_naics, i_state, i_city = col(r"employer|petitioner name"), col(r"fiscal year"), col(r"naics"), col(r"^state$|petitioner state"), col(r"^city$|petitioner city")
+        appr = [i for i, h in enumerate(header) if "approval" in h]
+        init = [i for i, h in enumerate(header) if re.search(r"(initial|new employment) approval", h)]
+        den = [i for i, h in enumerate(header) if "denial" in h]
+        if i_name < 0 or not appr:
+            raise ValueError("This doesn't look like a USCIS H-1B Employer Data Hub file (no Employer or Approval columns).")
+        num = lambda s: int(float(re.sub(r"[^\d.]", "", s) or 0))  # noqa: E731
+        agg: dict[str, dict] = {}
+        rows = 0
+        for cells in rd:
+            if len(cells) <= max(appr) or not cells[i_name].strip():
+                continue
+            rows += 1
+            year = num(cells[i_year]) if i_year >= 0 else 0
+            total, initial, denials = sum(num(cells[i]) for i in appr), sum(num(cells[i]) for i in init), sum(num(cells[i]) for i in den)
+            for key in classify.company_key_variants(cells[i_name]):
+                a = agg.get(key)
+                if a and a["year"] == year:
+                    a["total"] += total; a["initial"] += initial; a["denials"] += denials  # noqa: E702
+                elif not a or year > a["year"]:
+                    agg[key] = {"name": cells[i_name].strip(), "year": year, "total": total, "initial": initial, "denials": denials,
+                                "naics": cells[i_naics].strip() if i_naics >= 0 else "", "state": cells[i_state].strip() if i_state >= 0 else "",
+                                "city": cells[i_city].strip() if i_city >= 0 else ""}
+    with db() as con:
+        for key, a in agg.items():
+            if a["total"] <= 0:
+                continue
+            con.execute("""insert into h1b(company_key,name,fiscal_year,initial_approvals,total_approvals,denials,naics,state,city) values (?,?,?,?,?,?,?,?,?)
+                           on conflict(company_key) do update set name=excluded.name, fiscal_year=excluded.fiscal_year, initial_approvals=excluded.initial_approvals,
+                           total_approvals=excluded.total_approvals, denials=excluded.denials, naics=excluded.naics, state=excluded.state, city=excluded.city
+                           where excluded.fiscal_year >= h1b.fiscal_year""",
+                        (key, a["name"], a["year"], a["initial"], a["total"], a["denials"], a["naics"] or None, a["state"] or None, a["city"] or None))
+        # Industry may now be known from the filings' NAICS codes.
+        con.execute("update jobs set class_version=0 where coalesce(industry,'other')='other'")
+    years = {a["year"] for a in agg.values() if a["year"]}
+    log("you", "h1b", f"H-1B data: {len(agg)} employers from {rows} rows (FY{max(years) if years else '?'})")
+    return {"rows": rows, "employers": len(agg), "fiscal_year": max(years) if years else None}
+
+
+def h1b_for(keys: list[str]) -> dict[str, dict[str, Any]]:
+    """H-1B history by company key (the job's company_key, then looser forms of it)."""
+    from . import classify
+
+    with db() as con:
+        table = {r["company_key"]: dict(r) for r in con.execute("select * from h1b")}
+    out = {}
+    for k in set(keys):
+        if not k:
+            continue
+        hit = table.get(k) or next((table[v] for v in classify.company_key_variants(k) if v in table), None)
+        if hit:
+            out[k] = hit
+    return out
 
 
 # ------------------------------------------------------------ applications

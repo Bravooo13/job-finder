@@ -120,6 +120,23 @@ class SeleniumDriver:
         el.click()
         return True
 
+    def type_into(self, selector: str, text: str) -> bool:
+        el = self._find(selector)
+        if el is None:
+            return False
+        el.click()
+        el.clear()
+        el.send_keys(text)
+        return True
+
+    def texts(self, selector: str) -> list[str]:
+        from selenium.webdriver.common.by import By
+        return [e.text.strip() for e in self.d.find_elements(By.CSS_SELECTOR, selector) if e.text.strip()]
+
+    def dump(self, path: str) -> None:
+        open(path + ".html", "w").write(self.d.page_source)
+        self.d.save_screenshot(path + ".png")
+
     def click_text(self, pattern: str) -> bool:
         b = self._buttons(pattern)
         if not b:

@@ -17,7 +17,13 @@ function labelFor(el) {
   if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l && textOf(l)) return textOf(l); }
   const wrap = el.closest("label");
   if (wrap) { const c = wrap.cloneNode(true); c.querySelectorAll("input, select, textarea, option").forEach((n) => n.remove()); if (textOf(c)) return textOf(c); }
+  // Workday: a form field's legend or label (an aria-label like "Select One Required" says nothing)
+  const ff = el.closest('[data-automation-id^="formField-"]');
+  if (ff) { const l = ff.querySelector("legend, label"); if (l && textOf(l)) return textOf(l); }
   if (el.getAttribute("aria-label")) return el.getAttribute("aria-label");
+  // Workday parts outside a labelled form field (an SMS opt-in box): name them by their own id, never by a distant label
+  const auto = el.getAttribute("data-automation-id");
+  if (auto && !el.closest('[data-automation-id^="formField-"]')) return auto.replace(/[-_]+/g, " ");
   let p = el.parentElement;
   for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
     const h = p.querySelector("label, legend, .application-label, [class*='label' i], [class*='question' i], h3, h4");
@@ -29,8 +35,9 @@ const GENERIC_FILE = /^(attach|upload|browse|choose( a)? file|select( a)? file|a
 function fileLabel(el, label) {
   // New Greenhouse and others: the input's own label is the "Attach" button; the box's heading says Resume/CV.
   if (label && !GENERIC_FILE.test(label)) return label;
-  const g = el.closest("[aria-labelledby]");
-  if (g) { const t = textOf(document.getElementById(g.getAttribute("aria-labelledby"))); if (t && !GENERIC_FILE.test(t)) return t; }
+  for (const g of [el.closest("[aria-labelledby]"), el.closest('[role="group"][aria-labelledby]')]) {  // Workday: the section's heading ("Resume/CV")
+    if (g) { const t = textOf(document.getElementById(g.getAttribute("aria-labelledby"))); if (t && !GENERIC_FILE.test(t)) return t; }
+  }
   let p = el.parentElement;
   for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
     const h = [...p.querySelectorAll("label, legend, [class*='label' i], h3, h4")].find((x) => !x.contains(el) && textOf(x) && !GENERIC_FILE.test(textOf(x)));
@@ -79,13 +86,30 @@ SCAN = COMMON + r"""
 return (() => {
   const fields = []; let n = 0; const groups = new Map();
   const scope = document.querySelectorAll("form").length === 1 ? document.querySelector("form") : document.body;
-  for (const el of scope.querySelectorAll("input, select, textarea, [role='combobox']")) {
+  for (const el of scope.querySelectorAll("input, select, textarea, [role='combobox'], button[aria-haspopup='listbox']")) {
+    if (el.getAttribute("data-automation-id") === "beecatcher" || /beecatcher|honeypot/i.test(el.name || "")) continue;  // bot traps stay empty
+    if (el.closest('header, [data-automation-id="header"], [data-automation-id="utilityButtonBar"]')) continue;  // the site's own menus (language…)
+    // Workday's search-and-pick widget holds hidden checkboxes and lists of its own: only its search box is the field
+    if (el.getAttribute("data-uxi-widget-type") !== "selectinput" && el.closest('[data-automation-id="multiSelectContainer"], [data-automation-id="activeListContainer"], [role="listbox"], [data-automation-id="promptOption"], [data-automation-id="menuItem"], [data-uxi-widget-type]:not([data-uxi-widget-type="selectinput"])')) continue;
+    if (el.tagName === "BUTTON") {  // Workday-style dropdown: a button that opens a listbox
+      if (!visible(el) || el.disabled) continue;
+      const key = `jf-${n++}`; el.setAttribute("data-jf-key", key);
+      const label = labelFor(el);
+      fields.push({ key, label, type: "select", options: [], required: el.getAttribute("aria-required") === "true" || /\*\s*$/.test(label) || /\brequired\b/i.test(el.getAttribute("aria-label") || ""),
+        placeholder: "", hint: el.id || el.name || "", multiple: false, kind: "listbutton", id: el.id || "" });
+      continue;
+    }
     const type = fieldType(el); if (!type) continue;
     if (type !== "file" && (!visible(el) || shadow(el)) && !(type === "radio" || type === "checkbox")) continue;
     if ((type === "radio" || type === "checkbox") && el.name) { const k = `${type}:${el.name}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(el); continue; }
     if (el.disabled || el.readOnly) continue;
     const key = `jf-${n++}`; el.setAttribute("data-jf-key", key);
     const label = type === "file" ? fileLabel(el, labelFor(el)) : labelFor(el);
+    if (el.getAttribute("data-uxi-widget-type") === "selectinput") {  // Workday search-and-pick ("prompt") field
+      fields.push({ key, label, type: "combobox", options: [], required: el.getAttribute("aria-required") === "true" || /\*\s*$/.test(label),
+        placeholder: "", hint: el.id || "", multiple: false, kind: "wdprompt", id: el.id || "" });
+      continue;
+    }
     fields.push({ key, label, type, options: type === "select" ? [...el.options].map((o) => clean(o.textContent)).filter(Boolean) : [],
       required: el.required || el.getAttribute("aria-required") === "true" || /\*\s*$/.test(label), placeholder: el.getAttribute("placeholder") || "",
       hint: el.id || el.name || "", multiple: type === "combobox" ? Boolean(comboBox(el)?.querySelector('[class*="is-multi"], [class*="--multi"]')) : el.multiple, kind: "single", id: el.id || "" });
@@ -123,10 +147,23 @@ STATE = COMMON + r"""
 const items = arguments[0];
 const find = (k, id) => document.querySelector(`[data-jf-key="${k}"]`) || (id ? document.getElementById(id) : null);
 return items.map((f) => {
-  if (f.kind === "group") { const all = [...document.querySelectorAll(`[data-jf-key^="${f.key}#"]`)]; const on = all.filter((i) => i.checked); return { key: f.key, filled: on.length > 0, value: on.map(optionText).join(", ") }; }
+  if (f.kind === "group") {
+    let all = [...document.querySelectorAll(`[data-jf-key^="${f.key}#"]`)];
+    if (!all.length && f.name) all = [...document.querySelectorAll(`input[name="${CSS.escape(f.name)}"]`)];  // the page redrew the group
+    const on = all.filter((i) => i.checked); return { key: f.key, filled: on.length > 0, value: on.map(optionText).join(", ") };
+  }
   if (f.kind === "buttons") { const all = [...document.querySelectorAll(`[data-jf-key^="${f.key}#"]`)]; const on = all.find((b) => b.getAttribute("aria-pressed") === "true" || /\b(selected|active|checked|is-selected)\b/i.test(b.className)); return { key: f.key, filled: Boolean(on), value: on ? textOf(on) : "" }; }
   const el = find(f.key, f.id); if (!el) return { key: f.key, filled: false, value: "", gone: true };
   if (f.type === "file") { const name = el.files && el.files[0] ? el.files[0].name : ((textOf(el.closest('[class*="upload" i], [class*="file" i], .field') || el.parentElement).match(/[\w\-. ()]+\.(pdf|docx?|txt|rtf)\b/i) || [])[0] || ""); return { key: f.key, filled: Boolean(name), value: name }; }
+  if (f.kind === "wdprompt") {
+    const box = el.closest('[data-automation-id="multiSelectContainer"]') || el.parentElement;
+    const chips = [...box.querySelectorAll('[data-automation-id="selectedItem"]')].map(textOf).filter(Boolean);
+    const aria = textOf(box.querySelector('[data-automation-id="promptAriaInstruction"]'));
+    const m = /^(\d+) items? selected,?\s*(.*)$/i.exec(aria);
+    const v = chips.join(" + ") || (m && Number(m[1]) > 0 ? m[2] : "");
+    return { key: f.key, filled: Boolean(v), value: v };
+  }
+  if (f.kind === "listbutton") { const v = textOf(el); return { key: f.key, filled: Boolean(v) && !/^(select one|select|choose|--)$/i.test(v), value: v }; }
   if (f.type === "checkbox") return { key: f.key, filled: el.checked, value: el.checked ? "Ticked" : "" };
   if (f.type === "combobox") { const v = selectedText(el); return { key: f.key, filled: Boolean(v), value: v }; }
   if (f.type === "select") { const t = el.options[el.selectedIndex]?.text || ""; return { key: f.key, filled: Boolean(el.value) && !/^(select|choose|please select|--)/i.test(t), value: t }; }

@@ -1,0 +1,49 @@
+<!doctype html><html><body>
+<!-- A tiny stand-in for a Workday posting: Apply -> Apply Manually -> Create Account / Sign In -> My Information -> Review -->
+<div id="job"><a data-automation-id="adventureButton" href="#" onclick="show('pick');return false">Apply</a></div>
+<div id="pick" hidden><a data-automation-id="applyManually" href="#" onclick="show(localStorage.wdAcct ? 'signin' : 'create');return false">Apply Manually</a></div>
+<div id="create" hidden>
+  <label for="e1">Email Address*</label><input id="e1" data-automation-id="email" type="text">
+  <label for="p1">Password*</label><input id="p1" data-automation-id="password" type="password">
+  <label for="p2">Verify New Password*</label><input id="p2" data-automation-id="verifyPassword" type="password">
+  <input data-automation-id="beecatcher" type="text" style="position:absolute;left:-9999px">
+  <label><input type="checkbox" data-automation-id="createAccountCheckbox" id="terms"> I agree</label>
+  <div style="position:relative;display:inline-block">
+    <div data-automation-id="click_filter" role="button" aria-label="Create Account" onclick="create()" style="position:absolute;inset:0"></div>
+    <button data-automation-id="createAccountSubmitButton" aria-hidden="true" tabindex="-2">Create Account</button>
+  </div>
+  <button data-automation-id="signInLink" onclick="show('signin')">Sign In</button>
+</div>
+<div id="signin" hidden>
+  <label for="e2">Email Address*</label><input id="e2" data-automation-id="email" type="text">
+  <label for="p3">Password*</label><input id="p3" data-automation-id="password" type="password">
+  <button data-automation-id="signInSubmitButton" onclick="signin()">Sign In</button>
+  <div data-automation-id="errorMessage" id="err" hidden>Wrong email or password</div>
+</div>
+<div id="info" hidden>
+  <h2>My Information</h2>
+  <label for="c1">Country*</label><button id="c1" aria-haspopup="listbox" aria-required="true" onclick="openList()">Select One</button>
+  <ul role="listbox" id="lb" hidden><li role="option" onclick="pick('United States of America')">United States of America</li><li role="option" onclick="pick('Canada')">Canada</li></ul>
+  <label for="fn">Given Name(s)*</label><input id="fn" required>
+  <button data-automation-id="pageFooterNextButton" onclick="next()">Save and Continue</button>
+  <div data-automation-id="errorMessage" id="err2" hidden>Country is required</div>
+</div>
+<div id="review" hidden><div data-automation-id="reviewPage"><h2>Review</h2> Review and submit</div></div>
+<script>
+const show = (id) => { for (const s of document.querySelectorAll("body > div")) s.hidden = s.id !== id; };
+function create() {
+  if (document.querySelector('[data-automation-id="beecatcher"]').value) { document.title = "bot"; return; }
+  const [e, p, v] = ["e1", "p1", "p2"].map((i) => document.getElementById(i).value);
+  if (e && p && p === v && document.getElementById("terms").checked) { localStorage.wdAcct = e + "|" + p; show("info"); }
+}
+function signin() {
+  if (localStorage.wdAcct === document.getElementById("e2").value + "|" + document.getElementById("p3").value) show("info");
+  else document.getElementById("err").hidden = false;
+}
+const openList = () => { document.getElementById("lb").hidden = false; };
+const pick = (v) => { document.getElementById("c1").textContent = v; document.getElementById("lb").hidden = true; };
+function next() {
+  if (document.getElementById("c1").textContent === "Select One") { document.getElementById("err2").hidden = false; return; }
+  show("review");
+}
+</script></body></html>

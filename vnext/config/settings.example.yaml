@@ -6,3 +6,7 @@ check_first: true     # new applications are filled without Submit first; send t
 pause_seconds: 20     # between applications, to stay at a human pace
 driver: playwright    # playwright | selenium
 headless: false       # keep a visible window: you finish what needs you (codes, CAPTCHAs, sign-ins) there
+cover_letters: required  # required = write one when the form requires it; always = whenever the form takes one;
+                         # never = don't (a form that requires one stops for you)
+accounts: false          # true = make accounts on sign-in job sites (Workday...) for you: a new password per site,
+                         # kept in the macOS Keychain, listed in private/accounts.yaml. Only the owner turns this on.

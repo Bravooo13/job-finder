@@ -330,6 +330,48 @@ def _(p, f, q, c):
     return A(None, "low", "Attach this yourself (transcript, portfolio, …)")
 
 
+WD_ROW = re.compile(r"^(workExperience|education)-(\d+)--(\w+?)(?:-dateSection(Month|Year))?(?:-input)?$")
+
+
+@rule("workday-row", lambda q, f: bool(WD_ROW.match(f.hint or "")))
+def _(p, f, q, c):
+    """Workday's My Experience rows (workExperience-99--jobTitle, education-100--school…): row n = the n-th job or
+    school in profile.yaml `experience` / `education` (from the resume), in the order the rows are on the page."""
+    kind, rid, part, ym = WD_ROW.match(f.hint).groups()
+    rows = c.get("wd_rows", {}).get(kind, [])
+    items = p.get("experience" if kind == "workExperience" else "education") or []
+    n = rows.index(rid) if rid in rows else -1
+    if not 0 <= n < len(items):
+        return A(None, "low", f"Add your {'jobs' if kind == 'workExperience' else 'schools'} to profile.yaml (experience/education)")
+    it = items[n]
+    if kind == "workExperience":
+        value = {"jobTitle": it.get("title"), "companyName": it.get("company"), "location": it.get("location"),
+                 "currentlyWorkHere": bool(it.get("current")), "roleDescription": None}.get(part, "__date__")
+        if value == "__date__" and part in ("startDate", "endDate"):
+            date = str(it.get("start" if part == "startDate" else "end") or "")
+            if part == "endDate" and it.get("current"):
+                return A(None, "high", "Left blank: you work there now")
+            if not re.match(r"^\d{4}-\d{2}", date):
+                return A(None, "low", "Add the dates to profile.yaml experience")
+            return text(date[5:7] if ym == "Month" else date[:4])
+        if part == "currentlyWorkHere":
+            return A(value, "high")
+        return A(value or None, "high" if value else "low", "" if value else "Left blank")
+    if part in ("school", "schoolName"):
+        return text(it.get("school") or "")
+    if part == "degree":
+        return pick_or_text(f, degree_aliases(it.get("degree") or ""))
+    if part == "fieldOfStudy":
+        return pick_or_text(f, major_aliases(it.get("major") or ""))
+    if part == "gradeAverage":
+        # "" clears what Workday guessed from the resume (it can copy another school's GPA onto this row)
+        return A(it.get("gpa") or "", "high", "" if it.get("gpa") else "Left blank: no GPA for this school yet")
+    if part in ("firstYearAttended", "lastYearAttended", "startDate", "endDate"):
+        date = str(it.get("start" if part in ("firstYearAttended", "startDate") else "end") or "")
+        return text(date[5:7] if ym == "Month" else date[:4]) if date else A(None, "low", "Add the dates")
+    return A(None, "low", "")
+
+
 @rule("education-row", lambda q, f: bool(re.match(r"^(school|degree|discipline|start-month|start-year|end-month|end-year)--\d+$", f.hint or "")))
 def _(p, f, q, c):
     part, n = re.match(r"^([a-z-]+)--(\d+)$", f.hint).groups()
@@ -549,6 +591,8 @@ def _(p, f, q, c):
 # ---- contact
 @rule("first-name", lambda q, f: not is_choice(f) and bool(s(r"(^|your )(legal )?first name|given name|^first$", q)))
 def _(p, f, q, c):
+    if s(r"preferred", f.hint or ""):  # Workday: the Preferred Name section's "First Name" (id name--preferredName--firstName)
+        return text(p.get("preferredName") or p.get("firstName", ""))
     return text(p.get("firstName", ""))
 
 
@@ -572,6 +616,11 @@ def _(p, f, q, c):
     return text(p.get("email", ""))
 
 
+@rule("phone-extension", lambda q, f: not is_choice(f) and bool(s(r"\bextension\b|\bext\.?$", q) or s(r"extension", f.hint or "")))
+def _(p, f, q, c):
+    return A("", "high", "Left blank: no extension")  # "" also clears a number an earlier run put there
+
+
 @rule("phone", lambda q, f: not is_choice(f) and f.type != "checkbox" and (f.type == "tel" or bool(s(r"phone|mobile|cell", q))))
 def _(p, f, q, c):
     return text(p.get("phone", ""))
@@ -579,7 +628,10 @@ def _(p, f, q, c):
 
 @rule("linkedin", lambda q, f: "linkedin" in q)
 def _(p, f, q, c):
-    return text(p.get("linkedin", ""))
+    v = (p.get("linkedin") or "").strip()
+    if v and not re.match(r"https?://", v):  # some forms (Workday) only take a full address
+        v = "https://www." + v.removeprefix("www.")
+    return text(v)
 
 
 @rule("github", lambda q, f: bool(s(r"github|git hub", q)))
@@ -593,12 +645,12 @@ def _(p, f, q, c):
     return A(v or None, "medium" if v and not p.get("website") else "high")
 
 
-@rule("street", lambda q, f: bool(s(r"street|address line 1|^address( 1)?$|mailing address|home address", q)))
+@rule("street", lambda q, f: f.type not in ("radio", "checkbox") and len(q) < 80 and bool(s(r"street|address line 1|^address( 1)?$|mailing address|home address", q)))
 def _(p, f, q, c):
     return text(p.get("street", ""))
 
 
-@rule("address2", lambda q, f: bool(s(r"address line 2|\bapt\b|apartment|suite|\bunit\b", q)))
+@rule("address2", lambda q, f: f.type not in ("radio", "checkbox") and len(q) < 80 and bool(s(r"address line 2|\bapt\b|apartment|suite|\bunit\b", q)))
 def _(p, f, q, c):
     return A(p.get("street2") or None, "high")
 
@@ -614,7 +666,7 @@ def _(p, f, q, c):
     return pick_or_text(f, [st, STATE_CODES.get(st.lower(), "")])
 
 
-@rule("zip", lambda q, f: bool(s(r"zip|postal", q)))
+@rule("zip", lambda q, f: f.type not in ("radio", "checkbox") and len(q) < 80 and bool(s(r"zip|postal", q)))
 def _(p, f, q, c):
     return text(p.get("zip", ""))
 
@@ -700,12 +752,60 @@ def _(p, f, q, c):
     return A(p.get("salaryExpectation") or None, "medium" if p.get("salaryExpectation") else "low", "" if p.get("salaryExpectation") else "Say what you expect, or leave it for you")
 
 
+RACE_BOX = r"american indian|alaska native|\basian\b|black or african|native hawaiian|pacific islander|two or more races|\bwhite\b|declined? to answer|prefer not to (say|answer)|do not wish to"
+
+
+@rule("race-box", lambda q, f: f.type == "checkbox" and not f.options and len(q) < 90 and bool(s(RACE_BOX, q)))
+def _(p, f, q, c):
+    """Race shown as one checkbox per category (Workday's Voluntary Disclosures): tick yours, leave the rest."""
+    race = (p.get("race") or "").strip()
+    if not race:
+        return A(bool(s(r"declined? to answer|prefer not|do not wish", q)), "high", "Your race isn't set: declined")
+    return A(bool(re.search(rf"\b{re.escape(race)}\b", q, re.I)) and not s(r"two or more", q), "high")
+
+
+@rule("moving-from", lambda q, f: not is_choice(f) and bool(s(r"city,? state,? (and )?zip|(city|where).{0,40}moving from|relocat\w* from", q)))
+def _(p, f, q, c):
+    from .classify import STATES
+    st = next((k for k, v in STATES.items() if v.lower() == str(p.get("state", "")).lower()), p.get("state", ""))
+    v = " ".join(x for x in [f"{p.get('city', '')}, {st}".strip(", "), str(p.get("zip") or "")] if x)
+    return text(v) if p.get("city") else A(None, "low", "Add your city to profile.yaml")
+
+
+R.insert(0, R.pop())  # before the relocation rule: "tell us the city, state and zip you'd be moving from"
+
+
+@rule("sponsorship-countries", lambda q, f: not is_choice(f) and bool(s(r"(locations|countries).{0,60}require sponsorship|require sponsorship.{0,40}(locations|countries)", q)))
+def _(p, f, q, c):
+    return text("United States") if any_sponsorship(p) else text("N/A")
+
+
+R.insert(0, R.pop())
+
+
+@rule("sponsorship-type", lambda q, f: not is_choice(f) and bool(s(r"(describe|what|which|explain).{0,40}(type|kind) of (visa )?sponsorship|type of sponsorship", q)))
+def _(p, f, q, c):
+    v = p.get("visaStatus") or ""
+    if not v:
+        return A(None, "low", "Set your visa status in profile.yaml")
+    later = re.match(r"^y", str(p.get("needsSponsorshipLater", "")), re.I)
+    return text(f"{v} now; I would need H-1B sponsorship for full-time work after graduation." if later else f"{v}.")
+
+
+R.insert(0, R.pop())  # before the yes/no sponsorship rule
+
+
+@rule("phone-type", lambda q, f: bool(s(r"phone (device )?type|type of phone", q)))
+def _(p, f, q, c):
+    return pick_or_text(f, ["Mobile", "Cell", "Mobile Phone"]) if p.get("phone") else A(None, "low", "Add your phone to profile.yaml")
+
+
 @rule("hear-about", lambda q, f: bool(s(r"how did you (hear|find|learn)|where did you (hear|find|learn)|source of (application|referral)|referral source", q)))
 def _(p, f, q, c):
     return pick_or_text(f, [p.get("hearAbout") or "LinkedIn", "Job board", "Online", "Other"])
 
 
-@rule("worked-here", lambda q, f: bool(s(r"(worked|employed) (for|at|by|with) (us|this company|[a-z]+) before|previously (been )?(worked|employed)|former employee", q)))
+@rule("worked-here", lambda q, f: bool(s(r"(worked|employed) (for|at|by|with) (us|this company|[a-z]+) before|previously (been )?(worked|employed)|former employee|ever (worked|been employed) (at|for|by|with)", q)))
 def _(p, f, q, c):
     return yn(p.get("workedHereBefore") or "no", "high" if p.get("workedHereBefore") else "medium")
 
@@ -748,6 +848,8 @@ def _(p, f, q, c):
 @rule("eeo-hispanic", lambda q, f: bool(s(r"hispanic|latin[oax]", q)))
 def _(p, f, q, c):
     v = (p.get("hispanicLatino") or "").strip()
+    if f.type == "checkbox" and not f.options:  # one box among the race boxes: tick it only if you are
+        return A(bool(re.match(r"^yes\b", v, re.I)), "high")
     if re.match(r"^(no|not)\b", v, re.I) and is_choice(f):
         return pick_or_text(f, ["No", "Not Hispanic or Latino", "Not Hispanic or Latinx", "I am not Hispanic or Latino"])
     if re.match(r"^yes\b", v, re.I) and is_choice(f):
@@ -764,9 +866,15 @@ def _(p, f, q, c):
 def _(p, f, q, c):
     v = p.get("veteran", "")
     if re.match(r"^no\b", v, re.I) and is_choice(f):
-        hit = next((o for o in f.options if re.search(r"not a (protected )?veteran|i am not", o, re.I)), None) or choose_option(f.options, "no")
+        # Never "I identify as a veteran, just not a protected veteran": that one says you ARE a veteran.
+        opts = [o for o in f.options if not re.search(r"identify as (a|one)", o, re.I)]
+        hit = (next((o for o in opts if re.search(r"\bnot a veteran\b|i am not a veteran", o, re.I)), None)
+               or next((o for o in opts if re.search(r"i am not a protected veteran|\bnot a protected veteran\b", o, re.I)), None)
+               or next((o for o in opts if re.match(r"^no\b", o, re.I)), None))
         if hit:
             return A(hit)
+        if not f.options:  # choices not read yet (a Workday list): name the right one, never a bare "No"
+            return A("I am not a veteran", "high", alts=["I am not a protected veteran"])
     return eeo(f, v)
 
 
@@ -794,11 +902,18 @@ def answer_fields(fields: list[Field], profile: dict, context: Optional[dict] = 
     ctx = dict(context or {})
     rows = sorted({int(m.group(1)) for f in fields if (m := re.match(r"^school--(\d+)$", f.hint or ""))})
     ctx["education_rows"] = rows
+    wd: dict[str, list[str]] = {}
+    for f in fields:  # Workday rows in page order
+        m = WD_ROW.match(f.hint or "")
+        if m and m.group(2) not in wd.setdefault(m.group(1), []):
+            wd[m.group(1)].append(m.group(2))
+    ctx["wd_rows"] = wd
     saved = list(ctx.get("saved") or []) + list(profile.get("custom") or [])
     out = []
     for f in fields:
         q = normalize(f"{f.label} {f.placeholder}".strip())
-        hit = next((x for x in saved if same_question(x["question"], q)), None)
+        # the same wording first; a looser match ("Field of Study" vs "major or field of study") only after
+        hit = next((x for x in saved if normalize(x["question"]) == q), None) or next((x for x in saved if same_question(x["question"], q)), None)
         if hit and f.type != "file":
             value = choose_option(f.options, hit["answer"]) if is_choice(f) and f.options else hit["answer"]
             if f.type == "checkbox" and not f.options:

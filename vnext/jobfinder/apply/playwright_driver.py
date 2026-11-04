@@ -2,6 +2,7 @@
 sign-ins (Workday, Handshake) between runs. Real key presses for type-to-search dropdowns."""
 from __future__ import annotations
 
+import pathlib
 import re
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,7 @@ class PlaywrightDriver:
         self.ctx = self._pw.chromium.launch_persistent_context(
             str(profile), headless=sett.get("headless", False) if headless is None else headless, channel=channel, slow_mo=slow_mo,
             ignore_https_errors=ignore_https_errors, args=extra_args or [], viewport={"width": 1280, "height": 900},
+            locale="en-US",  # sites like Workday follow the browser's language; the answer engine reads English
         )
         self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
         self._kept: list = []
@@ -89,7 +91,7 @@ class PlaywrightDriver:
     def scan(self) -> list[dict]:
         fields = self.js(scripts.SCAN)
         for f in fields:  # dropdowns only list their choices when open: open each one once
-            if f["type"] == "combobox" and not f.get("options"):
+            if (f["type"] == "combobox" and f.get("kind") != "wdprompt" or f.get("kind") == "listbutton") and not f.get("options"):
                 f["options"] = self._read_combo(f)
         return fields
 
@@ -112,14 +114,17 @@ class PlaywrightDriver:
         return self.js(scripts.SHAPE)
 
     def states(self, fields: list[dict]) -> dict[str, dict]:
-        items = [{"key": f["key"], "kind": f.get("kind", "single"), "type": f["type"], "id": f.get("id", "")} for f in fields]
+        items = [{"key": f["key"], "kind": f.get("kind", "single"), "type": f["type"], "id": f.get("id", ""), "name": f.get("hint", "") if f.get("kind") == "group" else ""} for f in fields]
         return {s["key"]: s for s in self.js(scripts.STATE, items)}
 
     def probe(self) -> dict:
         return self.js(scripts.PROBE, outcome.PATTERNS)
 
+    def _shown(self, selector: str):
+        return self.page.locator(f"{selector} >> visible=true")
+
     def exists(self, selector: str) -> bool:
-        return self.page.locator(selector).count() > 0
+        return self._shown(selector).count() > 0
 
     def text_has(self, pattern: str) -> bool:
         return bool(re.search(pattern, self.page.inner_text("body"), re.I))
@@ -135,11 +140,28 @@ class PlaywrightDriver:
         return loc.first
 
     def click(self, selector: str) -> bool:
-        loc = self.page.locator(selector)
+        loc = self._shown(selector)
         if loc.count() == 0:
             return False
         loc.first.click()
         return True
+
+    def type_into(self, selector: str, text: str) -> bool:
+        loc = self._shown(selector)
+        if loc.count() == 0:
+            return False
+        loc.first.click()
+        loc.first.fill("")
+        loc.first.press_sequentially(text, delay=25)
+        return True
+
+    def texts(self, selector: str) -> list[str]:
+        return [x.strip() for x in self._shown(selector).all_inner_texts() if x.strip()]
+
+    def dump(self, path: str) -> None:
+        """Debugging: the page's HTML and a screenshot (only when JOBFINDER_DUMP is set)."""
+        pathlib.Path(path + ".html").write_text(self.page.content())
+        self.page.screenshot(path=path + ".png", full_page=True)
 
     def click_text(self, pattern: str) -> bool:
         b = self.page.get_by_role("button", name=re.compile(pattern, re.I))
@@ -165,6 +187,10 @@ class PlaywrightDriver:
                 return True
             if f.get("kind") == "buttons":
                 return self._pick_button(f, v)
+            if f.get("kind") == "listbutton":
+                return self._pick_list(self._el(f), v, a.get("alts") or [])
+            if f.get("kind") == "wdprompt":
+                return self._pick_prompt(self._el(f), v, a.get("alts") or [])
             if f.get("kind") == "group":
                 return self._pick_group(f, v)
             el = self._el(f)
@@ -179,6 +205,12 @@ class PlaywrightDriver:
             if f["type"] == "checkbox":
                 if bool(v) != el.is_checked():
                     el.click()
+                return True
+            if "dateSection" in (f.get("id") or ""):  # Workday month/year boxes listen to key presses (a display layer sits on top)
+                el.focus()
+                self.page.keyboard.press("ControlOrMeta+a")
+                self.page.keyboard.type(str(v), delay=40)
+                el.dispatch_event("blur")
                 return True
             el.fill(str(v))
             el.dispatch_event("blur")
@@ -200,8 +232,14 @@ class PlaywrightDriver:
                 continue
             i = f["options"].index(hit)
             el = self.page.locator(f'[data-jf-key="{f["key"]}#{i}"]').first
+            if not el.count() and f.get("hint"):  # the page redrew the group: same name, same order
+                el = self.page.locator(f'input[name="{f["hint"]}"]').nth(i)
+            lab = self.page.locator(f'label[for="{el.get_attribute("id")}"]') if el.get_attribute("id") else None
             if not el.is_checked():
-                el.check(force=True)
+                if lab is not None and lab.count():  # styled radios (Workday, React): the label click is what the page hears
+                    lab.first.click()
+                if not el.is_checked():
+                    el.check(force=True)
             any_ = True
         return any_
 
@@ -211,6 +249,74 @@ class PlaywrightDriver:
             return False
         self.page.locator(f'[data-jf-key="{f["key"]}#{f["options"].index(hit)}"]').first.click()
         return True
+
+    def _pick_list(self, el, value, alts: list[str] | None = None) -> bool:
+        """A button that opens a listbox (Workday): open it, click the option that matches. Only an exact match or
+        one that clearly contains the answer counts (a loose match once picked "...just not a protected veteran")."""
+        now = el.inner_text().strip().lower()
+        if now and any(now == str(w).strip().lower() for w in [value[0] if isinstance(value, list) else value, *(alts or [])]):
+            return True  # already shows this answer
+        el.scroll_into_view_if_needed()
+        el.click()
+        opts, last = [], -1
+        for _ in range(12):  # Workday draws the options a little after the list opens: wait until the list stops growing
+            self.wait(0.25)
+            opts = self._options(el)
+            if opts and len(opts) == last:
+                break
+            last = len(opts)
+        texts = [o.inner_text().strip() for o in opts]
+        for want in [str(value[0] if isinstance(value, list) else value), *(alts or [])]:
+            w = want.strip().lower()
+            hit = (next((x for x in texts if x.lower() == w), None)
+                   or next((x for x in texts if len(w) > 3 and re.search(rf"(^|\W){re.escape(w)}($|\W)", x, re.I)), None)
+                   or next((x for x in texts if len(x) > 3 and re.search(rf"(^|\W){re.escape(x.lower())}($|\W)", w)), None))
+            if hit:
+                opts[texts.index(hit)].click()
+                return True
+        self.page.keyboard.press("Escape")
+        return False
+
+    def _pick_prompt(self, el, value, alts: list[str]) -> bool:
+        """Workday's search-and-pick field: type, Enter, click the option that matches (categories open a
+        second list). Only an option equal to or containing the answer counts: never a look-alike."""
+        # the open list only: picked values elsewhere on the page are promptOption elements too
+        opts_sel = '[data-automation-id="promptOption"]:not([data-automation-id="selectedItemList"] *) >> visible=true'
+        # what the widget says is picked now ("1 item selected, Economics"), plus its chips
+        now = el.evaluate("""e => { const box = e.closest('[data-automation-id="multiSelectContainer"]') || e.parentElement;
+            const aria = (box.querySelector('[data-automation-id="promptAriaInstruction"]') || {}).textContent || "";
+            const m = /^\\s*(\\d+) items? selected,?\\s*(.*)$/i.exec(aria);
+            const chips = [...box.querySelectorAll('[data-automation-id="selectedItem"]')].map((c) => c.textContent.trim());
+            return [...chips, m && Number(m[1]) > 0 ? m[2] : ""].filter(Boolean); }""")
+        chips = [x.strip().lower() for x in now]
+        for w in [str(value[0] if isinstance(value, list) else value), *alts]:
+            if any(w.strip().lower() in c or c in w.strip().lower() for c in chips if c):
+                return True  # already picked (Workday read it from the resume)
+        for attempt in [str(value[0] if isinstance(value, list) else value), *alts]:
+            want = attempt.strip().lower()
+            el.click()
+            self.page.keyboard.press("ControlOrMeta+a")
+            self.page.keyboard.press("Backspace")
+            self.page.keyboard.type(attempt, delay=25)
+            self.page.keyboard.press("Enter")
+            for _depth in range(2):
+                texts: list[str] = []
+                for _ in range(10):
+                    self.wait(0.35)
+                    texts = [x.strip() for x in self.page.locator(opts_sel).all_inner_texts()]
+                    if texts:
+                        break
+                hit = next((x for x in texts if x.lower() == want), None) or next((x for x in texts if re.search(rf"\b{re.escape(want)}\b", x, re.I)), None)
+                if not hit:
+                    break
+                self.page.locator(opts_sel).nth(texts.index(hit)).click()
+                self.wait(0.8)
+                if not self.page.locator(opts_sel).count():  # picked a leaf: the list closed
+                    self.page.keyboard.press("Escape")
+                    self.wait(0.4)
+                    return True
+            self.page.keyboard.press("Escape")
+        return False
 
     def _options(self, el) -> list:
         lid = el.get_attribute("aria-controls") or el.get_attribute("aria-owns")

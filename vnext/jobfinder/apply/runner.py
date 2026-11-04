@@ -11,6 +11,8 @@ Order (the lessons of the first live run, see ../../CLAUDE.md):
 """
 from __future__ import annotations
 
+import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -51,13 +53,29 @@ def settle(d: Driver, min_s: float = 2.5, quiet_s: float = 1.5, max_s: float = 1
 
 def _files(job_id: Optional[str]) -> dict[str, Path]:
     out = {}
-    for kind, names in (("resume", ["resume.pdf", "Resume.pdf"]), ("cover_letter", [f"cover-letter-{job_id}.pdf", "cover-letter.pdf"]), ("transcript", ["transcript.pdf"])):
+    for kind, names in (("resume", ["resume.pdf", "Resume.pdf"]), ("cover_letter", [f"cover-letter-{job_id}.pdf"]), ("transcript", ["transcript.pdf"])):
         for n in names:
             p = config.FILES / n
             if p.exists():
                 out[kind] = p
                 break
     return out
+
+
+LETTER_NEED = "Write a cover letter for this job"
+LETTER_OFF = "This form requires a cover letter (cover_letters: never in settings)"
+
+
+def letter_needed(rep: list[dict], files: dict[str, Path], sett: dict) -> Optional[str]:
+    """Whether this form needs a cover letter written for it, by the cover_letters setting."""
+    boxes = [f for f in rep if f.get("rule") == "cover-letter-file" and not f.get("filled")]
+    if not boxes or "cover_letter" in files:
+        return None
+    required = any(f.get("required") for f in boxes)
+    mode = sett.get("cover_letters", "required")
+    if mode == "never":
+        return LETTER_OFF if required else None
+    return LETTER_NEED if required or mode == "always" else None
 
 
 def fill_page(d: Driver, app: dict, prof: dict, sett: dict, files: dict[str, Path]) -> tuple[list[dict], list[dict]]:
@@ -73,8 +91,9 @@ def fill_page(d: Driver, app: dict, prof: dict, sett: dict, files: dict[str, Pat
     ans = answer(fields)
     by_key = {f["key"]: f for f in fields}
     attached = False
+    uploaded = getattr(sites.for_platform(app.get("platform") or ""), "has_upload", lambda _d: False)(d)
     for a in ans:
-        if a.get("file") and a["file"] in files:
+        if a.get("file") and a["file"] in files and not (uploaded and a["file"] == "resume"):  # Workday kept it from last time
             attached |= d.fill(by_key[a["key"]], a, files)
     if attached or d.shape() != scanned:
         settle(d)
@@ -84,8 +103,31 @@ def fill_page(d: Driver, app: dict, prof: dict, sett: dict, files: dict[str, Pat
         by_key = {f["key"]: f for f in fields}
     for a in ans:
         if not a.get("file") and a.get("value") is not None:
-            d.fill(by_key[a["key"]], a, files)
+            ok = d.fill(by_key[a["key"]], a, files)
+            # a choice that couldn't be picked: flag it, even if the page still shows an older (maybe wrong) value
+            a["fill_failed"] = ok is False and by_key[a["key"]].get("kind") in ("listbutton", "wdprompt")
             d.wait(0.06)
+    # Fields that appeared because of an answer (Workday's "I have a preferred name" opens a section): fill those too.
+    settle(d, min_s=1.0, quiet_s=0.6, max_s=5)
+    if d.shape() != scanned:
+        seen = {f.get("id") or f["label"] for f in fields}
+        fields2 = d.scan()
+        new = [f for f in fields2 if (f.get("id") or f["label"]) not in seen]
+        if new:
+            ans2 = answer(new)
+            by2 = {f["key"]: f for f in fields2}
+            for a in ans2:
+                if not a.get("file") and a.get("value") is not None:
+                    d.fill(by2[a["key"]], a, files)
+                    d.wait(0.06)
+            keep = {f.get("id") or f["label"] for f in new}
+            old = {a["key"]: a for a in ans}
+            # Report on the page as it is now: the new fields' answers plus the earlier ones, matched by id or label.
+            prev = {(f.get("id") or f["label"]): old.get(f["key"]) for f in fields}
+            ans = [a for a in ans2] + [{**prev[f.get("id") or f["label"]], "key": f["key"]} for f in fields2
+                                        if (f.get("id") or f["label"]) not in keep and prev.get(f.get("id") or f["label"])]
+            fields = fields2
+            by_key = by2
     for _ in range(2):  # fields a React page cleared after another field changed
         st = d.states(fields)
         cleared = [a for a in ans if not a.get("file") and a.get("value") is not None and not st.get(a["key"], {}).get("filled")]
@@ -102,7 +144,10 @@ def report_fields(fields: list[dict], ans: list[dict], states: dict[str, dict]) 
     out = []
     for f in fields:
         a, s = by.get(f["key"], {}), states.get(f["key"], {})
-        out.append({"label": f["label"], "type": f["type"], "required": f.get("required", False), "filled": bool(s.get("filled")), "value": s.get("value", ""),
+        # A box deliberately left unticked (the answer was No) is answered, not missing.
+        filled = (bool(s.get("filled")) or (f["type"] == "checkbox" and a.get("value") is False and not s.get("gone"))) and not a.get("fill_failed")
+        out.append({"label": f["label"], "type": f["type"], "required": f.get("required", False), "filled": filled, "value": s.get("value", ""),
+                    "options": [o for o in (f.get("options") or []) if not re.match(r"^(select one|select|--)$", o, re.I)][:15],
                     "confidence": a.get("confidence", "high") if a.get("value") is not None else ("medium" if s.get("filled") and a.get("rule") in ("unknown", "open-question") else "high"),
                     "ai": a.get("rule") == "saved-ai-answer", "consent": bool(a.get("consent")), "rule": a.get("rule")})
     return out
@@ -116,41 +161,64 @@ def run(app: dict, d: Driver) -> dict:
     site = sites.for_platform(platform["id"])
     d.open(app["url"])
     settle(d)
+    held = site.start(d, app, sett, prof)
+    if held:
+        d.keep_open()
+        return store.report(app["id"], "needs_you", summary=held["summary"], needs=held["needs"])
+    settle(d)
     first = d.probe()
-    if first.get("password") or site.needs_sign_in(d):
+    if (first.get("password") and site.id != "workday") or site.needs_sign_in(d):
         d.keep_open()
         return store.report(app["id"], "needs_you", summary=f"{platform['name']} wants you to sign in (or make an account) first. Do it in the open browser window; the profile keeps you signed in. Then retry.", needs=[f"Sign in to {platform['name']}"])
     all_fields: list[dict] = []
+    dump = os.environ.get("JOBFINDER_DUMP")
     for page in range(site.max_pages):
         fields, ans = fill_page(d, app, prof, sett, files)
+        if dump and hasattr(d, "dump"):
+            d.dump(os.path.join(dump, f"{app['id']}-page{page + 1}"))
         states = d.states(fields)
         rep = report_fields(fields, ans, states)
+        if not fields and site.max_pages > 1 and not site.is_last_page(d):  # a page with no form (not Review): never "complete"
+            errs = site.page_errors(d) or [f"{platform['name']} page {page + 1} showed no form"]
+            d.keep_open()
+            return store.report(app["id"], "needs_you", summary=f"{platform['name']}: {errs[0]}", needs=errs, answers=_answers(all_fields))
         all_fields += rep
         blockers = ["Tick the \"I'm not a robot\" box"] if d.probe().get("robotBox") else []
-        decision = outcome.decide(sett["submit"], rep, approved=bool(app.get("approved")), blockers=blockers)
+        letter = letter_needed(rep, files, sett)
+        if letter:  # the agent writes it (`letters`, then `letter JOB FILE`), which retries the application
+            blockers.append(letter)
+            rep_d = [f for f in rep if f.get("rule") != "cover-letter-file"]
+        else:
+            rep_d = rep
+        decision = outcome.decide(sett["submit"], rep_d, approved=bool(app.get("approved")), blockers=blockers)
         if decision["action"] == "needs_you":
             d.keep_open()
             return store.report(app["id"], "needs_you", summary=decision["summary"], needs=decision["needs"], checks=decision["checks"], answers=_answers(all_fields))
         if site.is_last_page(d) or page == site.max_pages - 1:
             break
         if not site.next_page(d):
+            errs = site.page_errors(d)
+            if errs:  # the page didn't move on: say exactly what it wants
+                d.keep_open()
+                return store.report(app["id"], "needs_you", summary=f"{platform['name']} page {page + 1} wants: {'; '.join(errs[:3])}", needs=errs, answers=_answers(all_fields))
             break
         settle(d, min_s=1.5)
-    if app.get("check_only") or decision["action"] == "hold" or app.get("submit_pressed_at") or not site.may_submit:
+    # Sites that hand over at Review (Workday) submit only an application the owner approved (`act APP approve`).
+    if app.get("check_only") or decision["action"] == "hold" or app.get("submit_pressed_at") or (not site.may_submit and not app.get("approved")):
         d.keep_open()
         summary = decision["summary"] if site.may_submit else f"Filled up to {platform['name']}'s review page. Look it over and submit it yourself."
         return store.report(app["id"], "held", summary=summary, checks=decision["checks"], answers=_answers(all_fields))
-    return submit_and_watch(app, d, decision, all_fields)
+    return submit_and_watch(app, d, decision, all_fields, site)
 
 
 def _answers(rep: list[dict]) -> list[dict]:
     return [{"label": r["label"][:300], "value": str(r.get("value", ""))[:500], "confidence": r.get("confidence", "high"), "required": r.get("required", False)} for r in rep]
 
 
-def submit_and_watch(app: dict, d: Driver, decision: dict, rep: list[dict]) -> dict:
+def submit_and_watch(app: dict, d: Driver, decision: dict, rep: list[dict], site=None) -> dict:
     store.report(app["id"], "submitting", summary="Pressing Submit…")
     before = d.probe()
-    if not d.click_submit():
+    if not (site.submit(d) if site else d.click_submit()):
         d.keep_open()
         return store.report(app["id"], "held", summary="Couldn't find the Submit button.", answers=_answers(rep))
     last = None

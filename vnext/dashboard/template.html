@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Job Finder dashboard</title>
 <style>
-:root { --bg:#f7f7f5; --card:#fff; --text:#1f1f1d; --muted:#6b6a65; --line:#e4e2dc; --accent:#3c5bd6; --good:#1e7a4f; --warn:#a15c07; --bad:#b42318; --chip:#f0efea; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#161615; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a19a; --line:#34332f; --accent:#8aa2ff; --good:#5cc99a; --warn:#e3a54a; --bad:#f08a80; --chip:#2a2926; } }
-:root[data-theme="dark"] { --bg:#161615; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a19a; --line:#34332f; --accent:#8aa2ff; --good:#5cc99a; --warn:#e3a54a; --bad:#f08a80; --chip:#2a2926; }
+:root { --bg:#f7f7f5; --card:#fff; --text:#1f1f1d; --muted:#6b6a65; --line:#e4e2dc; --accent:#3c5bd6; --good:#1e7a4f; --warn:#a15c07; --bad:#b42318; --chip:#f0efea; --chart:#3c5bd6; --grid:#ecebe6; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#161615; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a19a; --line:#34332f; --accent:#8aa2ff; --good:#5cc99a; --warn:#e3a54a; --bad:#f08a80; --chip:#2a2926; --chart:#6f88f0; --grid:#2c2b28; } }
+:root[data-theme="dark"] { --bg:#161615; --card:#1f1f1d; --text:#ecebe6; --muted:#a3a19a; --line:#34332f; --accent:#8aa2ff; --good:#5cc99a; --warn:#e3a54a; --bad:#f08a80; --chip:#2a2926; --chart:#6f88f0; --grid:#2c2b28; }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width:1180px; margin:0 auto; padding:24px 16px 64px; }
@@ -25,13 +25,60 @@ input[type=search] { flex:1; min-width:180px; } select { max-width:100%; }
 .table { width:100%; border-collapse:collapse; font-size:14px; }
 .table th { text-align:left; color:var(--muted); font-weight:500; border-bottom:1px solid var(--line); padding:6px 8px; white-space:nowrap; }
 .table td { border-bottom:1px solid var(--line); padding:8px; vertical-align:top; }
-.wrap { overflow-x:auto; }
+.wrap { overflow-x:auto; position:relative; }
 a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
 .chip { display:inline-block; padding:1px 8px; border-radius:999px; background:var(--chip); font-size:12px; white-space:nowrap; }
 .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
 ul.needs { margin:4px 0 0; padding-left:18px; color:var(--bad); font-size:13px; }
 .empty { color:var(--muted); padding:16px 0; text-align:center; }
 @media (max-width:640px) { .hide-sm { display:none; } }
+nav.tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:20px; overflow-x:auto; }
+nav.tabs button { font:inherit; color:var(--muted); background:none; border:0; border-bottom:2px solid transparent; padding:8px 14px; cursor:pointer; white-space:nowrap; }
+nav.tabs button[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); font-weight:600; }
+nav.tabs button:hover { color:var(--text); }
+[role="tabpanel"][hidden] { display:none; }
+.btn { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; }
+.btn:hover { border-color:var(--accent); }
+.stats { display:flex; flex-wrap:wrap; gap:6px 18px; margin:0 0 12px; font-size:13px; color:var(--muted); }
+.stats b { color:var(--text); font-variant-numeric:tabular-nums; }
+.mapwrap { position:relative; }
+svg.usmap { width:100%; height:auto; display:block; }
+svg.usmap .st { stroke:var(--card); stroke-width:.6; cursor:pointer; transition:opacity .15s; }
+svg.usmap .st:hover { opacity:.8; }
+svg.usmap .st.sel { stroke:var(--text); stroke-width:1.6; }
+svg.usmap .borders { fill:none; stroke:var(--card); stroke-width:.8; pointer-events:none; }
+svg.usmap .dot { fill:var(--accent); fill-opacity:.75; stroke:var(--card); stroke-width:1.2; cursor:pointer; }
+svg.usmap .dot:hover, svg.usmap .dot.sel { fill-opacity:1; stroke:var(--text); }
+svg.usmap .dot.state { fill:var(--warn); }
+svg.usmap text { font:600 11px system-ui, sans-serif; fill:var(--text); paint-order:stroke; stroke:var(--card); stroke-width:3px; pointer-events:none; }
+.tip { position:absolute; pointer-events:none; background:var(--text); color:var(--bg); font-size:12px; padding:4px 8px; border-radius:6px; white-space:nowrap; transform:translate(-50%, -130%); display:none; }
+.legend { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); margin-top:8px; flex-wrap:wrap; }
+.legend i { display:inline-block; width:26px; height:10px; border-radius:2px; }
+.places { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 14px; }
+.places button { font:inherit; font-size:13px; color:inherit; background:var(--chip); border:1px solid transparent; border-radius:999px; padding:2px 10px; cursor:pointer; }
+.places button.sel { border-color:var(--accent); }
+.charts { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:18px; margin-top:6px; }
+.chart h3 { font-size:14px; font-weight:600; margin:0 0 2px; } .chart .muted { margin:0 0 8px; }
+.chart { position:relative; } .chart svg { width:100%; height:auto; display:block; overflow:visible; }
+.chart .bar { fill:var(--chart); cursor:default; } .chart .bar:hover, .chart .bar:focus { opacity:.82; outline:none; }
+.chart .gridl { stroke:var(--grid); stroke-width:1; } .chart .axis { fill:var(--muted); font:11px system-ui, sans-serif; }
+.chart .val { fill:var(--text); font:600 11px system-ui, sans-serif; }
+.chart .hit { fill:transparent; }
+details.tbl { margin-top:6px; font-size:13px; } details.tbl summary { color:var(--muted); cursor:pointer; }
+.h1b { font-size:11px; color:var(--good); white-space:nowrap; }
+.note { font-size:12px; color:var(--muted); margin-top:2px; }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+body:not(.live) .live-only { display:none; }
+.btn.sm { font-size:13px; padding:3px 10px; white-space:nowrap; } .btn.on { border-color:var(--good); color:var(--good); }
+.btn:disabled { opacity:.5; cursor:wait; }
+.seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:0 0 12px; }
+.seg button { font:inherit; font-size:14px; color:var(--muted); background:var(--bg); border:0; padding:6px 14px; cursor:pointer; }
+.seg button + button { border-left:1px solid var(--line); }
+.seg button[aria-pressed="true"] { background:var(--card); color:var(--text); font-weight:600; }
+.infogrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); gap:0 18px; }
+dl.info { display:grid; grid-template-columns:minmax(120px, 42%) 1fr; gap:6px 12px; margin:0; font-size:14px; }
+dl.info dt { color:var(--muted); } dl.info dd { margin:0; overflow-wrap:anywhere; } dl.info dd.unset { color:var(--muted); font-style:italic; }
+.hint { font-size:12px; color:var(--muted); margin:10px 0 0; } .hint code { background:var(--chip); padding:1px 5px; border-radius:4px; }
 </style>
 </head>
 <body>
@@ -40,33 +87,137 @@ ul.needs { margin:4px 0 0; padding-left:18px; color:var(--bad); font-size:13px; 
     <h1>Job Finder</h1>
     <span class="muted" id="generated"></span>
   </header>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" id="tab-overview" aria-controls="overview" aria-selected="true">Overview</button>
+    <button role="tab" id="tab-found" aria-controls="found" aria-selected="false">Found jobs</button>
+    <button role="tab" id="tab-toapply" aria-controls="toapply" aria-selected="false">To apply</button>
+    <button role="tab" id="tab-applied" aria-controls="applied" aria-selected="false">Applied</button>
+    <button role="tab" id="tab-map" aria-controls="map" aria-selected="false">Map</button>
+    <button role="tab" id="tab-info" aria-controls="info" aria-selected="false">My info</button>
+  </nav>
+
+  <div role="tabpanel" id="overview" aria-labelledby="tab-overview">
   <section class="tiles" id="tiles" aria-label="Counts"></section>
 
   <section class="card" aria-labelledby="apps-h">
-    <h2 id="apps-h">Applications</h2>
+    <h2 id="apps-h">Needs your attention</h2>
     <div class="bar">
-      <select id="app-status" aria-label="Status"><option value="">All statuses</option></select>
+      <select id="app-status" aria-label="Status"><option value="open">Waiting on you or in progress</option><option value="">All applications</option></select>
       <input type="search" id="app-q" placeholder="Search company or title" aria-label="Search applications">
     </div>
     <div class="wrap"><table class="table"><thead><tr><th>Status</th><th>Job</th><th class="hide-sm">What's next</th><th class="hide-sm">Updated</th></tr></thead><tbody id="apps"></tbody></table></div>
   </section>
 
+  <section class="card" aria-labelledby="top-h">
+    <h2 id="top-h">Best new matches</h2>
+    <p class="muted" style="margin:-6px 0 10px">New, visa-friendly jobs with the highest match score.</p>
+    <div class="wrap"><table class="table"><tbody id="top-jobs"></tbody></table></div>
+    <p style="margin:10px 0 0"><button class="btn" type="button" id="top-all">See all found jobs</button></p>
+  </section>
+
+  <section class="card" aria-labelledby="act-h">
+    <h2 id="act-h">Recent activity</h2>
+    <div id="activity"></div>
+  </section>
+  </div>
+
+  <div role="tabpanel" id="found" aria-labelledby="tab-found" hidden>
   <section class="card" aria-labelledby="jobs-h">
     <h2 id="jobs-h">Found jobs</h2>
+    <p class="muted static-note" hidden style="margin:-6px 0 10px">To add jobs to your To apply list with a click, open the dashboard with <code>python -m jobfinder serve</code>. Here you can still tell Claude which ones to add.</p>
     <div class="bar">
-      <select id="job-visa" aria-label="Visa"><option value="">Any visa status</option><option value="friendly">Visa-friendly (sponsors, OPT/CPT, not stated)</option><option value="sponsors">Sponsors</option><option value="opt_cpt">OPT/CPT OK</option><option value="no_sponsorship">No sponsorship</option><option value="citizens_only">Citizens only</option></select>
+      <select id="job-visa" aria-label="Visa"><option value="">Any visa status</option><option value="friendly">Visa-friendly (sponsors, OPT/CPT, not stated)</option><option value="h1b">Known H-1B sponsors (no red flags)</option><option value="sponsors">Says it sponsors</option><option value="opt_cpt">OPT/CPT OK</option><option value="no_sponsorship">No sponsorship</option><option value="citizens_only">Citizens only</option></select>
+      <select id="job-industry" aria-label="Industry"><option value="">Any industry</option></select>
+      <select id="job-role" aria-label="Role type"><option value="">Any role</option></select>
+      <select id="job-type" aria-label="Job type"><option value="">Any job type</option><option value="internship">Internship</option><option value="full_time">Full-time</option><option value="part_time">Part-time</option><option value="contract">Contract</option></select>
+      <select id="job-work" aria-label="Workplace"><option value="">Any workplace</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">Onsite</option></select>
+      <select id="job-posted" aria-label="Posted"><option value="">Posted any time</option><option value="1">Past 24 hours</option><option value="3">Past 3 days</option><option value="7">Past week</option><option value="14">Past 2 weeks</option><option value="30">Past month</option></select>
+      <select id="job-years" aria-label="Years of experience asked"><option value="">Any experience asked</option><option value="0">Doesn't ask for years</option><option value="1">Up to 1 year</option><option value="2">Up to 2 years</option><option value="3">Up to 3 years</option><option value="5">Up to 5 years</option></select>
+      <label class="muted"><input type="checkbox" id="job-pay"> Shows pay</label>
       <select id="job-status" aria-label="Job status"><option value="">Any</option><option value="new">New</option><option value="saved">Saved</option><option value="applied">Applied</option></select>
       <label class="muted">Min score <input type="number" id="job-min" min="0" max="100" value="0" style="width:70px"></label>
       <input type="search" id="job-q" placeholder="Search title, company, place" aria-label="Search jobs">
     </div>
-    <div class="wrap"><table class="table"><thead><tr><th>Score</th><th>Job</th><th class="hide-sm">Where</th><th>Visa</th><th class="hide-sm">Platform</th></tr></thead><tbody id="jobs"></tbody></table></div>
+    <div class="wrap"><table class="table"><thead><tr><th>Score</th><th>Job</th><th class="hide-sm">Where</th><th>Visa</th><th class="hide-sm">Industry</th><th class="live-only"><span class="sr">To apply</span></th></tr></thead><tbody id="jobs"></tbody></table></div>
     <p class="muted" id="jobs-count"></p>
   </section>
 
-  <section class="card" aria-labelledby="act-h">
-    <h2 id="act-h">Activity</h2>
-    <div id="activity"></div>
+  </div>
+
+  <div role="tabpanel" id="toapply" aria-labelledby="tab-toapply" hidden>
+  <section class="card" aria-labelledby="list-h">
+    <h2 id="list-h">To apply</h2>
+    <p class="muted" style="margin:-6px 0 10px">The jobs you picked. Tell Claude <b>"apply to my list"</b> to apply to the ones not in Auto apply yet, or <b>"pick ten Chicago jobs and apply"</b> to let it choose. Jobs leave this list once they're applied.</p>
+    <p class="muted static-note" hidden style="margin:0 0 10px">To take jobs off with a click, open the dashboard with <code>python -m jobfinder serve</code>.</p>
+    <p class="stats" id="list-stats"></p>
+    <div class="wrap"><table class="table"><thead><tr><th>Score</th><th>Job</th><th class="hide-sm">Where</th><th>Visa</th><th>Where it is</th><th class="live-only"><span class="sr">Remove</span></th></tr></thead><tbody id="list-jobs"></tbody></table></div>
   </section>
+  </div>
+
+  <div role="tabpanel" id="applied" aria-labelledby="tab-applied" hidden>
+  <section class="card" aria-labelledby="rec-h">
+    <h2 id="rec-h">Jobs you applied to</h2>
+    <section class="tiles" id="rec-tiles" aria-label="Where your applications stand"></section>
+    <div class="charts">
+      <figure class="chart" id="chart-weeks" style="margin:0"></figure>
+      <figure class="chart" id="chart-ind" style="margin:0"></figure>
+    </div>
+    <div class="tip" id="chart-tip"></div>
+  </section>
+  <section class="card" aria-labelledby="rec2-h">
+    <h2 id="rec2-h">Every application</h2>
+    <p class="stats" id="rec-stats"></p>
+    <div class="bar">
+      <select id="rec-status" aria-label="Show">
+        <option value="submitted">Submitted</option>
+        <option value="all">Submitted and Sent? Check</option>
+        <option value="unsure">Sent? Check only</option>
+      </select>
+      <select id="rec-track" aria-label="Where it stands"><option value="">Any outcome</option><option value="applied">Waiting to hear back</option><option value="interview">Interviewing</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="withdrawn">Withdrew</option></select>
+      <input type="search" id="rec-q" placeholder="Search company, title, place" aria-label="Search applied jobs">
+      <button class="btn" id="rec-csv" type="button">Download CSV</button>
+    </div>
+    <div class="wrap"><table class="table"><thead><tr><th>Applied</th><th>Job</th><th class="hide-sm">Where</th><th>Visa</th><th class="hide-sm">Through</th><th>Where it stands</th></tr></thead><tbody id="recs"></tbody></table></div>
+    <p class="hint">To update one, tell Claude ("I got an interview at Acme") or run <code>python -m jobfinder track Acme interview --note "phone screen Nov 10"</code>. Then rebuild the dashboard.</p>
+  </section>
+  </div>
+
+  <div role="tabpanel" id="map" aria-labelledby="tab-map" hidden>
+  <section class="card" aria-labelledby="map-h">
+    <h2 id="map-h">Where the jobs are</h2>
+    <div class="bar">
+      <select id="map-layer" aria-label="Which jobs">
+        <option value="applied">Jobs you applied to</option>
+        <option value="applied+">Applied and Sent? Check</option>
+        <option value="active">Saved or in Auto apply</option>
+        <option value="found">Top found jobs</option>
+      </select>
+      <select id="map-visa" aria-label="Visa"><option value="">Any visa status</option><option value="friendly">Visa-friendly</option><option value="h1b">Known H-1B sponsors</option><option value="sponsors">Says it sponsors</option></select>
+      <select id="map-industry" aria-label="Industry"><option value="">Any industry</option></select>
+      <button class="btn" id="map-clear" type="button" hidden>Show all places</button>
+    </div>
+    <p class="stats" id="map-stats"></p>
+    <div class="mapwrap"><svg class="usmap" id="usmap" role="img" aria-label="Map of the United States with the jobs by place"></svg><div class="tip" id="map-tip"></div></div>
+    <div class="legend" id="map-legend"></div>
+  </section>
+  <section class="card" aria-labelledby="mapl-h">
+    <h2 id="mapl-h">Places</h2>
+    <div class="places" id="map-places"></div>
+    <div class="wrap"><table class="table"><thead><tr><th>Job</th><th class="hide-sm">Where</th><th>Visa</th><th>Status</th></tr></thead><tbody id="map-jobs"></tbody></table></div>
+    <p class="muted" id="map-count"></p>
+  </section>
+  <p class="muted">Map: US Census Bureau outlines (us-atlas) and GeoNames cities (CC BY 4.0), drawn offline.</p>
+  </div>
+
+  <div role="tabpanel" id="info" aria-labelledby="tab-info" hidden>
+  <section class="card">
+    <h2>My info</h2>
+    <p class="muted" style="margin:-6px 0 0">What application forms are filled with. It's read from <code id="info-path"></code>: to change something, edit that file (or tell Claude), then rebuild the dashboard. <span id="info-gaps"></span></p>
+  </section>
+  <div class="infogrid" id="info-sections"></div>
+  <section class="card"><h2>Your own questions and answers</h2><p class="muted" style="margin:-6px 0 10px">From <code>custom</code> in profile.yaml, and answers saved for every form.</p><div id="info-saved"></div></section>
+  <section class="card"><h2>Files</h2><p class="muted" style="margin:-6px 0 10px">In private/files: attached to forms that ask for them.</p><div id="info-files"></div></section>
+  </div>
 </main>
 <script>
 const DATA = /*__DATA__*/null;
@@ -77,43 +228,356 @@ const ago = (t) => { if (!t) return ""; const s = (Date.now() / 1000 - t); retur
 const tone = { submitted: "good", ready: "good", needs_you: "bad", unsure: "warn", held: "warn", failed: "bad" };
 const visaTone = { sponsors: "good", opt_cpt: "good", no_sponsorship: "bad", citizens_only: "bad" };
 const visaLabel = { sponsors: "Sponsors", opt_cpt: "OPT/CPT OK", unknown: "Not stated", no_sponsorship: "No sponsorship", citizens_only: "Citizens only" };
+const RED = ["no_sponsorship", "citizens_only"];
+const visaOk = (j, v) => !v || (v === "friendly" ? ["sponsors", "opt_cpt", "unknown"].includes(j.visa) : v === "h1b" ? Boolean(j.h1b) && !RED.includes(j.visa) : j.visa === v);
+const h1bBadge = (j) => j.h1b ? `<div class="h1b" title="USCIS: ${esc(j.h1b[2])}, fiscal year ${j.h1b[1]}">H-1B: ${j.h1b[0].toLocaleString()} approved (FY${j.h1b[1]})</div>` : "";
+const IND = D.industries || {}, ROLES = D.roles || {}, TRACK = D.track_labels || {};
+const postedAt = (j) => { const t = Date.parse(j.posted_at || ""); return Number.isNaN(t) ? (j.created_at || 0) * 1000 : t; };
+function fillOptions(id, labels, key) {
+  const n = {}; for (const j of D.jobs) n[j[key] || "other"] = (n[j[key] || "other"] || 0) + 1;
+  const ids = Object.keys(labels).filter((k) => n[k]).sort((a, b) => (a === "other") - (b === "other") || n[b] - n[a]);
+  $(id).insertAdjacentHTML("beforeend", ids.map((k) => `<option value="${k}">${esc(labels[k])} (${n[k].toLocaleString()})</option>`).join(""));
+}
+fillOptions("job-industry", IND, "industry"); fillOptions("job-role", ROLES, "role_type"); fillOptions("map-industry", IND, "industry");
 $("generated").textContent = `Updated ${D.generated_at ? new Date(D.generated_at * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : D.generated}`;
 
 const count = (st) => D.applications.filter((a) => a.status === st).length;
+const OPEN_APPS = ["needs_you", "ready", "held", "unsure", "queued", "running", "submitting"];
+const weekAgo = Date.now() - 7 * 86400000;
+// The To apply list: saved jobs. appByJobAny = each job's latest application (any status).
+const appByJobAny = {};
+for (const a of D.applications) if (a.job_id && !appByJobAny[a.job_id]) appByJobAny[a.job_id] = a;
+const TO_APPLY = () => D.jobs.filter((j) => j.status === "saved");
+if (D.live) document.body.classList.add("live"); else document.querySelectorAll(".static-note").forEach((n) => { n.hidden = false; });
+// Add to / take off the To apply list (only when served by `python -m jobfinder serve`).
+async function setList(id, on, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("/api/to-apply", { method: "POST", headers: { "Content-Type": "application/json", "X-Job-Finder-Token": D.token }, body: JSON.stringify(on ? { add: [id] } : { remove: [id] }) });
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.error || r.status);
+    const j = jobById[id]; if (j && out.jobs[id]) j.status = out.jobs[id];
+  } catch (e) { alert(`Couldn't save that (${e.message}). Is \`python -m jobfinder serve\` still running?`); }
+  drawJobs(); drawList(); drawTiles();
+}
+const listBtn = (j) => !D.live ? "" : j.status === "saved"
+  ? `<button class="btn sm on" type="button" data-list="${j.id}" data-on="0" title="Take it off your To apply list">✓ To apply</button>`
+  : ["new", "dismissed", null, undefined].includes(j.status) ? `<button class="btn sm" type="button" data-list="${j.id}" data-on="1">+ To apply</button>` : "";
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-list]"); if (b) setList(b.dataset.list, b.dataset.on === "1", b); });
+const goFound = (setup) => {
+  for (const id of ["job-visa", "job-industry", "job-role", "job-type", "job-work", "job-posted", "job-years", "job-status", "job-q"]) $(id).value = "";
+  $("job-min").value = "0"; $("job-pay").checked = false;
+  setup(); drawJobs(); showTab("found", true);
+};
+const goApplied = (track) => { $("rec-status").value = "submitted"; $("rec-track").value = track; drawRecs(); showTab("applied", true); };
 const tiles = [
-  ["Found jobs", D.jobs.length, () => { $("job-status").value = ""; drawJobs(); $("jobs-h").scrollIntoView({ behavior: "smooth" }); }],
-  ["Saved", D.jobs.filter((j) => j.status === "saved").length, () => { $("job-status").value = "saved"; drawJobs(); $("jobs-h").scrollIntoView({ behavior: "smooth" }); }],
-  ...["queued", "ready", "needs_you", "unsure", "submitted"].map((st) => [D.labels[st] || st, count(st), () => { $("app-status").value = st; drawApps(); $("apps-h").scrollIntoView({ behavior: "smooth" }); }]),
+  ["Found jobs", D.jobs.length, () => goFound(() => { $("job-status").value = ""; $("job-posted").value = ""; })],
+  ["Posted this week", D.jobs.filter((j) => j.status === "new" && postedAt(j) >= weekAgo).length, () => goFound(() => { $("job-status").value = "new"; $("job-posted").value = "7"; })],
+  ["To apply", () => TO_APPLY().length, () => showTab("toapply", true)],
+  ["Applied", D.applications.filter((a) => a.status === "submitted").length + D.jobs.filter((j) => j.status === "applied" && !D.applications.some((a) => a.job_id === j.id && a.status === "submitted")).length, () => goApplied("")],
+  ["Interviewing", D.jobs.filter((j) => j.status === "interview").length, () => goApplied("interview")],
+  ["Offers", D.jobs.filter((j) => j.status === "offer").length, () => goApplied("offer")],
+  ["Needs you", D.applications.filter((a) => OPEN_APPS.includes(a.status) && !["queued", "running", "submitting"].includes(a.status)).length, () => { $("app-status").value = "open"; drawApps(); $("apps-h").scrollIntoView({ behavior: "smooth" }); }],
 ];
-$("tiles").innerHTML = tiles.map(([l, n], i) => `<button class="tile" data-i="${i}"><b>${n}</b><span class="muted">${esc(l)}</span></button>`).join("");
-$("tiles").querySelectorAll(".tile").forEach((b) => b.addEventListener("click", () => tiles[b.dataset.i][2]()));
+function drawTiles() {
+  $("tiles").innerHTML = tiles.map(([l, n], i) => `<button class="tile" data-i="${i}"><b>${typeof n === "function" ? n() : n}</b><span class="muted">${esc(l)}</span></button>`).join("");
+  $("tiles").querySelectorAll(".tile").forEach((b) => b.addEventListener("click", () => tiles[b.dataset.i][2]()));
+}
+drawTiles();
 
-for (const [k, v] of Object.entries(D.labels)) $("app-status").insertAdjacentHTML("beforeend", `<option value="${k}">${esc(v)}</option>`);
+// ----- To apply tab -----
+function drawList() {
+  const rows = TO_APPLY().sort((a, b) => (b.score || 0) - (a.score || 0));
+  const waiting = rows.filter((j) => !appByJobAny[j.id]).length;
+  $("tab-toapply").textContent = `To apply (${rows.length})`;
+  $("list-stats").innerHTML = `<span><b>${rows.length}</b> on your list</span><span><b>${waiting}</b> not in Auto apply yet</span><span><b>${rows.length - waiting}</b> already in Auto apply</span>`;
+  $("list-jobs").innerHTML = rows.map((j) => { const a = appByJobAny[j.id]; return `<tr>
+    <td style="font-variant-numeric:tabular-nums">${j.score ?? ""}</td>
+    <td><a href="${esc(j.url)}" target="_blank" rel="noreferrer">${esc(j.title)}</a><div class="muted">${esc(j.company)}</div></td>
+    <td class="hide-sm">${esc(j.location || "")}</td>
+    <td><span class="chip ${visaTone[j.visa] || ""}" title="${esc(j.visa_note || "")}">${esc(visaLabel[j.visa] || "Not stated")}</span>${h1bBadge(j)}</td>
+    <td>${a ? `<span class="chip ${tone[a.status] || ""}">${esc(D.labels[a.status] || a.status)}</span>` : `<span class="chip">Not queued yet</span>`}</td>
+    <td class="live-only">${D.live ? `<button class="btn sm" type="button" data-list="${j.id}" data-on="0">Remove</button>` : ""}</td></tr>`; }).join("")
+    || `<tr><td colspan="6" class="empty">Your list is empty. Add jobs from Found jobs, tell Claude which ones, or let it pick.</td></tr>`;
+}
+
+for (const [k, v] of Object.entries(D.labels)) if (count(k)) $("app-status").insertAdjacentHTML("beforeend", `<option value="${k}">${esc(v)} (${count(k)})</option>`);
 function drawApps() {
   const st = $("app-status").value, q = $("app-q").value.toLowerCase();
-  const rows = D.applications.filter((a) => (!st || a.status === st) && (!q || `${a.company} ${a.title}`.toLowerCase().includes(q)));
+  const rows = D.applications.filter((a) => (!st || (st === "open" ? OPEN_APPS.includes(a.status) : a.status === st)) && (!q || `${a.company} ${a.title}`.toLowerCase().includes(q)));
   $("apps").innerHTML = rows.length ? rows.map((a) => `<tr>
     <td><span class="chip ${tone[a.status] || ""}">${esc(D.labels[a.status] || a.status)}</span>${a.check_only ? ' <span class="chip">check only</span>' : ""}</td>
     <td><a href="${esc(a.url)}" target="_blank" rel="noreferrer">${esc(a.title)}</a><div class="muted">${esc(a.company)}</div></td>
-    <td class="hide-sm">${(a.needs || []).length && /^needs you/i.test(a.summary || "") ? "Answer these:" : esc(a.summary || "")}${(a.needs || []).length ? `<ul class="needs">${a.needs.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}${a.page_note ? `<div class="muted">Page: ${esc(a.page_note)}</div>` : ""}</td>
-    <td class="hide-sm muted">${ago(a.updated_at)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">No applications${st ? " with this status" : " yet"}.</td></tr>`;
+    <td class="hide-sm">${(a.needs || []).length && /^needs you/i.test(a.summary || "") ? "Answer these:" : esc(a.summary || "")}${(a.needs || []).length ? `<ul class="needs">${a.needs.slice(0, 3).map((n) => `<li>${esc(n.length > 110 ? n.slice(0, 107) + "…" : n)}</li>`).join("")}${a.needs.length > 3 ? `<li style="list-style:none;color:var(--muted)">and ${a.needs.length - 3} more</li>` : ""}</ul>` : ""}${a.page_note ? `<div class="muted">Page: ${esc(a.page_note)}</div>` : ""}</td>
+    <td class="hide-sm muted">${ago(a.updated_at)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty">${st === "open" ? "Nothing needs you right now." : `No applications${st ? " with this status" : " yet"}.`}</td></tr>`;
 }
 function drawJobs() {
   const visa = $("job-visa").value, st = $("job-status").value, min = Number($("job-min").value) || 0, q = $("job-q").value.toLowerCase();
+  const ind = $("job-industry").value, role = $("job-role").value, type = $("job-type").value, work = $("job-work").value;
+  const posted = Number($("job-posted").value) || 0, yrs = $("job-years").value, pay = $("job-pay").checked, since = Date.now() - posted * 86400000;
   const rows = D.jobs.filter((j) => (!st || j.status === st) && (j.score || 0) >= min && (!q || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q))
-    && (!visa || (visa === "friendly" ? ["sponsors", "opt_cpt", "unknown"].includes(j.visa) : j.visa === visa)));
+    && visaOk(j, visa) && (!ind || (j.industry || "other") === ind) && (!role || (j.role_type || "other") === role) && (!type || j.job_type === type)
+    && (!work || j.workplace === work || (work === "remote" && j.remote)) && (!posted || postedAt(j) >= since)
+    && (yrs === "" || (yrs === "0" ? j.years == null : j.years == null || j.years <= Number(yrs))) && (!pay || j.pay));
   $("jobs").innerHTML = rows.slice(0, 400).map((j) => `<tr>
     <td style="font-variant-numeric:tabular-nums">${j.score ?? ""}</td>
-    <td><a href="${esc(j.url)}" target="_blank" rel="noreferrer">${esc(j.title)}</a><div class="muted">${esc(j.company)}${j.status && j.status !== "new" ? ` · ${esc(j.status)}` : ""}</div></td>
-    <td class="hide-sm">${esc(j.location || "")}</td>
-    <td><span class="chip ${visaTone[j.visa] || ""}" title="${esc(j.visa_note || "")}">${esc(visaLabel[j.visa] || "Not stated")}</span></td>
-    <td class="hide-sm muted">${esc(j.platform || "")}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">No jobs match.</td></tr>`;
+    <td><a href="${esc(j.url)}" target="_blank" rel="noreferrer">${esc(j.title)}</a><div class="muted">${esc(j.company)}${j.status && j.status !== "new" ? ` · ${esc(j.status === "saved" ? "To apply" : TRACK[j.status] || j.status)}` : ""}${j.years ? ` · asks ${j.years}+ yrs` : ""}</div></td>
+    <td class="hide-sm">${esc(j.location || "")}${j.workplace ? ` <span class="chip">${esc(j.workplace)}</span>` : ""}${j.pay ? `<div class="note">${esc(j.pay)}</div>` : ""}</td>
+    <td><span class="chip ${visaTone[j.visa] || ""}" title="${esc(j.visa_note || "")}">${esc(visaLabel[j.visa] || "Not stated")}</span>${h1bBadge(j)}</td>
+    <td class="hide-sm muted">${esc(IND[j.industry] || "Other")}<div class="note">${esc(ROLES[j.role_type] || "")}</div></td>
+    <td class="live-only">${listBtn(j)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No jobs match.</td></tr>`;
   $("jobs-count").textContent = `${rows.length} of ${D.jobs.length} jobs${rows.length > 400 ? " (first 400 shown)" : ""}`;
 }
 ["app-status", "app-q"].forEach((id) => $(id).addEventListener("input", drawApps));
-["job-visa", "job-status", "job-min", "job-q"].forEach((id) => $(id).addEventListener("input", drawJobs));
-$("activity").innerHTML = D.activity.length ? `<table class="table"><tbody>${D.activity.map((x) => `<tr><td class="muted" style="white-space:nowrap">${ago(x.at)}</td><td><span class="chip">${esc(x.who)}</span></td><td>${esc(x.title)}</td></tr>`).join("")}</tbody></table>` : `<p class="empty">Nothing yet.</p>`;
-drawApps(); drawJobs();
+["job-visa", "job-status", "job-min", "job-q", "job-industry", "job-role", "job-type", "job-work", "job-posted", "job-years", "job-pay"].forEach((id) => $(id).addEventListener("input", drawJobs));
+const actRow = (x) => `<tr><td class="muted" style="white-space:nowrap">${ago(x.at)}</td><td><span class="chip">${esc(x.who)}</span></td><td>${esc(x.title)}</td></tr>`;
+function drawActivity(all) {
+  const rows = all ? D.activity : D.activity.slice(0, 8);
+  $("activity").innerHTML = D.activity.length ? `<table class="table"><tbody>${rows.map(actRow).join("")}</tbody></table>${!all && D.activity.length > 8 ? `<p style="margin:10px 0 0"><button class="btn" type="button" id="act-more">Show all ${D.activity.length}</button></p>` : ""}` : `<p class="empty">Nothing yet.</p>`;
+  $("act-more")?.addEventListener("click", () => drawActivity(true));
+}
+drawActivity(false);
+const TOP = D.jobs.filter((j) => j.status === "new" && visaOk(j, "friendly")).sort((a, b) => (b.score || 0) - (a.score || 0) || postedAt(b) - postedAt(a)).slice(0, 6);
+$("top-jobs").innerHTML = TOP.map((j) => `<tr><td style="font-variant-numeric:tabular-nums;width:40px">${j.score ?? ""}</td>
+  <td><a href="${esc(j.url)}" target="_blank" rel="noreferrer">${esc(j.title)}</a><div class="muted">${esc(j.company)} · ${esc(j.location || "")}</div></td>
+  <td class="hide-sm"><span class="chip ${visaTone[j.visa] || ""}">${esc(visaLabel[j.visa] || "Not stated")}</span>${h1bBadge(j)}</td></tr>`).join("") || `<tr><td class="empty">No new visa-friendly jobs. Run find.</td></tr>`;
+$("top-all").addEventListener("click", () => goFound(() => { $("job-status").value = "new"; $("job-visa").value = "friendly"; }));
+drawApps(); drawJobs(); drawList();
+
+// ----- Tabs (the address keeps the tab: #applied, #map) -----
+const TABS = ["overview", "found", "toapply", "applied", "map", "info"];
+function showTab(name, push) {
+  if (!TABS.includes(name)) name = "overview";
+  for (const t of TABS) { $(t).hidden = t !== name; $(`tab-${t}`).setAttribute("aria-selected", String(t === name)); }
+  if (push) history.replaceState(null, "", name === "overview" ? location.pathname : `#${name}`);
+  if (name === "map") drawMap();
+}
+TABS.forEach((t) => $(`tab-${t}`).addEventListener("click", () => showTab(t, true)));
+addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+
+// ----- Applied -----
+const jobById = Object.fromEntries(D.jobs.map((j) => [j.id, j]));
+const day = (t) => t ? new Date(t * 1000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "";
+const EVENTS = {};
+for (const e of D.events || []) (EVENTS[e.job_id] ||= []).push(e);
+const AFTER = ["interview", "offer", "rejected", "withdrawn"];
+const trackOf = (j) => AFTER.includes(j.status) ? j.status : "applied";
+const lastNote = (j) => { const n = (EVENTS[j.id] || []).filter((e) => e.note).pop(); return n ? `${day(n.at)}: ${n.note}` : ""; };
+const trackTone = { interview: "good", offer: "good", rejected: "bad", withdrawn: "" };
+const RECORDS = (() => {
+  const out = [], seen = new Set();
+  const appliedAt = (j, fallback) => ((EVENTS[j.id] || []).find((e) => e.status === "applied") || {}).at || fallback;
+  for (const a of D.applications) {
+    if (!["submitted", "unsure"].includes(a.status)) continue;
+    const j = jobById[a.job_id] || {};
+    if (a.job_id) seen.add(a.job_id);
+    out.push({ at: a.status === "submitted" ? appliedAt(j, a.updated_at) : a.updated_at, title: a.title || j.title, company: a.company || j.company, where: j.location || "", visa: j.visa, visa_note: j.visa_note, through: a.through || a.platform || j.platform || "", status: a.status, track: a.status === "submitted" ? trackOf(j) : "", url: j.url || a.url, job: j });
+  }
+  // Jobs marked applied (or further) by hand, with no Auto apply record.
+  for (const j of D.jobs) if (["applied", ...AFTER].includes(j.status) && !seen.has(j.id)) out.push({ at: appliedAt(j, j.updated_at), title: j.title, company: j.company, where: j.location || "", visa: j.visa, visa_note: j.visa_note, through: (j.platform || "").replace(/^./, (c) => c.toUpperCase()), status: "submitted", track: trackOf(j), url: j.url, job: j, byHand: true });
+  return out.sort((x, y) => (y.at || 0) - (x.at || 0));
+})();
+function recRows() {
+  const st = $("rec-status").value, tr = $("rec-track").value, q = $("rec-q").value.toLowerCase();
+  return RECORDS.filter((r) => (st === "all" || r.status === st) && (!tr || r.track === tr) && (!q || `${r.company} ${r.title} ${r.where}`.toLowerCase().includes(q)));
+}
+function drawRecs() {
+  const rows = recRows(), sub = RECORDS.filter((r) => r.status === "submitted");
+  const week = sub.filter((r) => r.at && Date.now() / 1000 - r.at < 7 * 86400).length;
+  const cos = new Set(sub.map((r) => r.company)).size;
+  $("rec-stats").innerHTML = `<span><b>${sub.length}</b> submitted</span><span><b>${week}</b> in the last 7 days</span><span><b>${cos}</b> companies</span><span><b>${RECORDS.length - sub.length}</b> Sent? Check (look for their email)</span>`;
+  $("recs").innerHTML = rows.length ? rows.map((r) => `<tr>
+    <td class="muted" style="white-space:nowrap">${day(r.at)}</td>
+    <td><a href="${esc(r.url)}" target="_blank" rel="noreferrer">${esc(r.title)}</a><div class="muted">${esc(r.company)}</div></td>
+    <td class="hide-sm">${esc(r.where)}</td>
+    <td><span class="chip ${visaTone[r.visa] || ""}" title="${esc(r.visa_note || "")}">${esc(visaLabel[r.visa] || "Not stated")}</span>${h1bBadge(r.job)}</td>
+    <td class="hide-sm muted">${esc(r.through)}${r.byHand ? " · marked by hand" : ""}${(D.letters || []).includes(r.job.id) ? `<div class="note">with a cover letter</div>` : ""}</td>
+    <td>${r.status === "unsure" ? `<span class="chip warn">${esc(D.labels.unsure)}</span>` : `<span class="chip ${trackTone[r.track] ?? ""}">${esc(r.track === "applied" ? "Waiting to hear back" : TRACK[r.track] || r.track)}</span>`}${r.job.id && lastNote(r.job) ? `<div class="note">${esc(lastNote(r.job))}</div>` : ""}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="empty">Nothing here yet.</td></tr>`;
+}
+$("rec-csv").addEventListener("click", () => {
+  const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [["Applied", "Company", "Title", "Where", "Visa", "Through", "Status", "Link"].join(",")]
+    .concat(recRows().map((r) => [r.at ? new Date(r.at * 1000).toISOString().slice(0, 10) : "", r.company, r.title, r.where, visaLabel[r.visa] || "Not stated", r.through, D.labels[r.status] || r.status, r.url].map(cell).join(",")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+  a.download = `applied-jobs-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+});
+["rec-status", "rec-track", "rec-q"].forEach((id) => $(id).addEventListener("input", drawRecs));
+drawRecs();
+
+// ----- Progress: tiles and two charts (one series each: no legend, the title names it) -----
+(function progress() {
+  const sub = RECORDS.filter((r) => r.status === "submitted");
+  const n = (tr) => sub.filter((r) => r.track === tr).length;
+  const heard = n("interview") + n("offer") + n("rejected");
+  const tiles = [["Applied", sub.length, ""], ["Waiting to hear back", n("applied"), "applied"], ["Interviewing", n("interview"), "interview"],
+    ["Offers", n("offer"), "offer"], ["Rejected", n("rejected"), "rejected"], ["Heard back", sub.length ? `${Math.round(100 * heard / sub.length)}%` : "–", ""]];
+  $("rec-tiles").innerHTML = tiles.map(([l, v, tr], i) => `<button class="tile" type="button" data-tr="${tr}"><b>${v}</b><span class="muted">${esc(l)}</span></button>`).join("");
+  $("rec-tiles").querySelectorAll(".tile").forEach((b) => b.addEventListener("click", () => { $("rec-status").value = "submitted"; $("rec-track").value = b.dataset.tr; drawRecs(); $("rec2-h").scrollIntoView({ behavior: "smooth" }); }));
+
+  const tip = $("chart-tip");
+  const show = (e, html) => { const box = $("applied").getBoundingClientRect(), r = e.target.getBoundingClientRect(); tip.innerHTML = html; tip.style.display = "block"; tip.style.left = `${r.left + r.width / 2 - box.left}px`; tip.style.top = `${r.top - box.top}px`; };
+  const hide = () => { tip.style.display = "none"; };
+  const hook = (el) => el.querySelectorAll("[data-tip]").forEach((m) => { m.addEventListener("pointermove", (e) => show(e, m.dataset.tip)); m.addEventListener("focus", (e) => show(e, m.dataset.tip)); m.addEventListener("pointerleave", hide); m.addEventListener("blur", hide); });
+  const top4 = (x, y, w, h) => h <= 0 ? "" : `M${x},${y + h}V${y + Math.min(4, h)}Q${x},${y} ${x + Math.min(4, w / 2)},${y}H${x + w - Math.min(4, w / 2)}Q${x + w},${y} ${x + w},${y + Math.min(4, h)}V${y + h}Z`;
+  const right4 = (x, y, w, h) => w <= 0 ? "" : `M${x},${y}H${x + w - Math.min(4, w)}Q${x + w},${y} ${x + w},${y + Math.min(4, h / 2)}V${y + h - Math.min(4, h / 2)}Q${x + w},${y + h} ${x + w - Math.min(4, w)},${y + h}H${x}Z`;
+  const ticks = (max) => { const step = max <= 5 ? 1 : max <= 10 ? 2 : max <= 25 ? 5 : Math.ceil(max / 5 / 5) * 5; const out = []; for (let v = 0; v <= max; v += step) out.push(v); if (out[out.length - 1] < max) out.push(out[out.length - 1] + step); return out; };
+
+  // 1. Applications per week, the last 12 weeks (weeks start Monday).
+  const monday = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); };
+  const now = monday(Date.now()), weeks = [];
+  for (let i = 11; i >= 0; i--) weeks.push({ start: now - i * 7 * 86400000, n: 0 });
+  // Weeks apart by rounding, so a daylight-saving change (an hour short or long) doesn't drop a week.
+  for (const r of sub) { const back = Math.round((now - monday((r.at || 0) * 1000)) / (7 * 86400000)); if (back >= 0 && back < 12) weeks[11 - back].n++; }
+  const W = 560, H = 210, L = 28, B = 24, T = 14, maxW = ticks(Math.max(1, ...weeks.map((w) => w.n))), yMax = maxW[maxW.length - 1];
+  const band = (W - L) / weeks.length, bw = Math.min(24, band * 0.6), y = (v) => T + (H - T - B) * (1 - v / yMax);
+  const fmt = (ms) => new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+  const cur = weeks[weeks.length - 1];
+  $("chart-weeks").innerHTML = `<h3>Applications per week</h3><p class="muted">Submitted, last 12 weeks${cur.n ? ` · this week: ${cur.n}` : ""}</p>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Applications submitted per week for the last 12 weeks">
+      ${maxW.map((v) => `<line class="gridl" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"></line><text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join("")}
+      ${weeks.map((w, i) => { const x = L + band * i + (band - bw) / 2, h = y(0) - y(w.n), label = `<b>${w.n}</b> application${w.n === 1 ? "" : "s"}<br>week of ${fmt(w.start)}`;
+        return `<path class="bar" d="${top4(x, y(w.n), bw, h)}"></path><rect class="hit" x="${L + band * i}" y="${T}" width="${band}" height="${H - T - B}" tabindex="0" data-tip="${esc(label)}"></rect>
+        ${i % 2 === weeks.length % 2 || i === weeks.length - 1 ? `<text class="axis" x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${fmt(w.start)}</text>` : ""}`; }).join("")}
+      ${cur.n ? `<text class="val" x="${L + band * (weeks.length - 1) + band / 2}" y="${y(cur.n) - 5}" text-anchor="middle">${cur.n}</text>` : ""}
+    </svg>
+    <details class="tbl"><summary>Show as a table</summary><table class="table"><thead><tr><th>Week of</th><th>Applications</th></tr></thead><tbody>${weeks.slice().reverse().map((w) => `<tr><td>${fmt(w.start)}</td><td>${w.n}</td></tr>`).join("")}</tbody></table></details>`;
+
+  // 2. Applications by industry.
+  const byInd = {}; for (const r of sub) { const k = r.job.industry || "other"; byInd[k] = (byInd[k] || 0) + 1; }
+  const inds = Object.entries(byInd).sort((a, b) => b[1] - a[1]);
+  const rowH = 30, LW = 170, IW = 560, IH = Math.max(1, inds.length) * rowH + 6, xMax = Math.max(1, ...inds.map(([, v]) => v));
+  const xs = (v) => (IW - LW - 36) * v / xMax;
+  $("chart-ind").innerHTML = `<h3>Applications by industry</h3><p class="muted">Submitted, all time</p>
+    ${inds.length ? `<svg viewBox="0 0 ${IW} ${IH}" role="img" aria-label="Applications submitted by industry">
+      ${inds.map(([k, v], i) => { const yy = 4 + i * rowH, label = `<b>${v}</b> application${v === 1 ? "" : "s"}<br>${esc(IND[k] || "Other")}`;
+        return `<text class="axis" x="${LW - 8}" y="${yy + 15}" text-anchor="end" style="fill:var(--text)">${esc(IND[k] || "Other")}</text>
+        <path class="bar" d="${right4(LW, yy + 4, xs(v), 16)}"></path><text class="val" x="${LW + xs(v) + 6}" y="${yy + 16}">${v}</text>
+        <rect class="hit" x="0" y="${yy}" width="${IW}" height="${rowH}" tabindex="0" data-tip="${esc(label)}"></rect>`; }).join("")}
+    </svg>` : `<p class="empty">No applications yet.</p>`}`;
+  hook($("chart-weeks")); hook($("chart-ind"));
+})();
+
+// ----- Map -----
+const NS = "http://www.w3.org/2000/svg";
+const appByJob = {};
+for (const a of D.applications) if (a.job_id && !appByJob[a.job_id]) appByJob[a.job_id] = a;
+const jobStatus = (j) => { if (AFTER.includes(j.status)) return j.status; const a = appByJob[j.id]; return a ? a.status : j.status === "applied" ? "submitted" : j.status; };
+const ACTIVE = new Set(["queued", "running", "ready", "held", "needs_you", "submitting", "unsure", "submitted"]);
+let mapSel = null; // {kind: "state"|"place", key}
+function mapJobs() {
+  const layer = $("map-layer").value, visa = $("map-visa").value;
+  return D.jobs.filter((j) => {
+    const s = jobStatus(j);
+    const done = s === "submitted" || AFTER.includes(s);
+    const inLayer = layer === "applied" ? done : layer === "applied+" ? done || s === "unsure"
+      : layer === "active" ? j.status === "saved" || ACTIVE.has(s) : true;
+    const ind = $("map-industry").value;
+    return inLayer && visaOk(j, visa) && (!ind || (j.industry || "other") === ind);
+  });
+}
+let mapBuilt = false;
+function buildMap() {
+  if (mapBuilt || !D.map) return; mapBuilt = true;
+  const svg = $("usmap"); svg.setAttribute("viewBox", `0 0 ${D.map.width} ${D.map.height}`);
+  for (const s of D.map.states) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", s.d); p.setAttribute("class", "st"); p.dataset.code = s.code; p.dataset.name = s.name;
+    svg.appendChild(p);
+  }
+  const b = document.createElementNS(NS, "path"); b.setAttribute("class", "borders"); b.setAttribute("d", D.map.borders); svg.appendChild(b);
+  const g = document.createElementNS(NS, "g"); g.id = "map-dots"; svg.appendChild(g);
+  const tip = $("map-tip");
+  const at = (e) => { const r = svg.parentElement.getBoundingClientRect(); tip.style.left = `${e.clientX - r.left}px`; tip.style.top = `${e.clientY - r.top}px`; };
+  svg.addEventListener("mousemove", (e) => { const t = e.target.dataset?.tip; if (t) { tip.textContent = t; tip.style.display = "block"; at(e); } else tip.style.display = "none"; });
+  svg.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  svg.addEventListener("click", (e) => {
+    const d = e.target.dataset || {};
+    if (d.place) mapSel = mapSel?.key === d.place ? null : { kind: "place", key: d.place };
+    else if (d.code) mapSel = mapSel?.key === d.code ? null : { kind: "state", key: d.code };
+    else mapSel = null;
+    drawMap();
+  });
+}
+function drawMap() {
+  buildMap(); if (!D.map) return;
+  const jobs = mapJobs(), byPlace = {}, byState = {};
+  let remote = 0, off = 0;
+  for (const j of jobs) {
+    if (!j.pl.length) { if (j.remote) remote++; else off++; }
+    const states = new Set();
+    for (const l of j.pl) { (byPlace[l] ||= []).push(j); states.add(D.places[l][2]); }
+    for (const s of states) (byState[s] ||= []).push(j);
+  }
+  const maxS = Math.max(1, ...Object.values(byState).map((x) => x.length));
+  for (const p of $("usmap").querySelectorAll(".st")) {
+    const n = (byState[p.dataset.code] || []).length;
+    p.style.fill = n ? `color-mix(in srgb, var(--accent) ${Math.round(18 + 62 * Math.sqrt(n / maxS))}%, var(--card))` : "var(--chip)";
+    p.dataset.tip = `${p.dataset.name}: ${n} job${n === 1 ? "" : "s"}`;
+    p.classList.toggle("sel", mapSel?.kind === "state" && mapSel.key === p.dataset.code);
+  }
+  const places = Object.entries(byPlace).sort((a, b) => b[1].length - a[1].length);
+  const maxP = Math.max(1, ...places.map(([, x]) => x.length));
+  const many = places.length > 60;
+  const g = $("map-dots");
+  g.innerHTML = places.slice().reverse().map(([l, js]) => {
+    const [x, y, , city] = D.places[l], n = js.length, r = (many ? 2 : 4) + (many ? 14 : 12) * Math.sqrt(n / maxP);
+    const sel = mapSel?.kind === "place" && mapSel.key === l ? " sel" : "";
+    return `<circle class="dot${city ? "" : " state"}${sel}" cx="${x}" cy="${y}" r="${r.toFixed(1)}" data-place="${esc(l)}" data-tip="${esc(l)}: ${n} job${n === 1 ? "" : "s"}${city ? "" : " (state only)"}"></circle>`;
+  }).join("") + (() => {
+    // Labels for the biggest places, skipping any that would sit on one already drawn.
+    const boxes = [], out = [];
+    for (const [l, js] of places.slice(0, many ? 40 : 30)) {
+      if (out.length >= (many ? 12 : 30)) break;
+      const [x, y] = D.places[l], r = (many ? 2 : 4) + (many ? 14 : 12) * Math.sqrt(js.length / maxP);
+      const text = `${l.replace(/, [A-Z]{2}$/, "")} ${js.length}`, bx = x + r + 3, w = text.length * 6.6;
+      const box = [bx, y - 9, bx + w, y + 5];
+      if (boxes.some((o) => box[0] < o[2] && box[2] > o[0] && box[1] < o[3] && box[3] > o[1])) continue;
+      boxes.push(box);
+      out.push(`<text x="${bx.toFixed(1)}" y="${(y + 4).toFixed(1)}">${esc(text)}</text>`);
+    }
+    return out.join("");
+  })();
+  const onMap = jobs.length - remote - off;
+  $("map-stats").innerHTML = `<span><b>${jobs.length}</b> jobs</span><span><b>${onMap}</b> on the map</span><span><b>${Object.keys(byState).length}</b> states</span><span><b>${places.length}</b> places</span><span><b>${remote}</b> remote</span><span><b>${off}</b> outside the US or no place given</span>`;
+  $("map-legend").innerHTML = `<span>Fewer</span><i style="background:color-mix(in srgb, var(--accent) 18%, var(--card))"></i><i style="background:color-mix(in srgb, var(--accent) 50%, var(--card))"></i><i style="background:color-mix(in srgb, var(--accent) 80%, var(--card))"></i><span>More jobs in the state</span><span>· circles: cities (bigger = more jobs)</span><span>· orange: only the state is known</span><span>· click a state or circle to list its jobs</span>`;
+  // List under the map.
+  $("map-clear").hidden = !mapSel;
+  $("map-places").innerHTML = places.slice(0, 40).map(([l, js]) => `<button type="button" data-place="${esc(l)}" class="${mapSel?.key === l ? "sel" : ""}">${esc(l)} · ${js.length}</button>`).join("")
+    + (remote ? `<button type="button" data-place="__remote" class="${mapSel?.key === "__remote" ? "sel" : ""}">Remote · ${remote}</button>` : "");
+  const stateName = mapSel?.kind === "state" ? (D.map.states.find((s) => s.code === mapSel.key) || {}).name : "";
+  const list = !mapSel ? jobs : mapSel.key === "__remote" ? jobs.filter((j) => !j.pl.length && j.remote)
+    : mapSel.kind === "state" ? byState[mapSel.key] || [] : byPlace[mapSel.key] || [];
+  $("mapl-h").textContent = mapSel ? (mapSel.key === "__remote" ? "Remote jobs" : `Jobs in ${stateName || mapSel.key}`) : "Places";
+  $("map-jobs").innerHTML = list.slice(0, 300).map((j) => { const s = jobStatus(j); return `<tr>
+    <td><a href="${esc(j.url)}" target="_blank" rel="noreferrer">${esc(j.title)}</a><div class="muted">${esc(j.company)}</div></td>
+    <td class="hide-sm">${esc(j.location || "")}</td>
+    <td><span class="chip ${visaTone[j.visa] || ""}" title="${esc(j.visa_note || "")}">${esc(visaLabel[j.visa] || "Not stated")}</span></td>
+    <td><span class="chip ${tone[s] || trackTone[s] || ""}">${esc(D.labels[s] || TRACK[s] || s || "")}</span></td></tr>`; }).join("") || `<tr><td colspan="4" class="empty">No jobs here.</td></tr>`;
+  $("map-count").textContent = list.length > 300 ? `First 300 of ${list.length} shown.` : `${list.length} job${list.length === 1 ? "" : "s"}.`;
+}
+$("map-places").addEventListener("click", (e) => { const l = e.target.dataset?.place; if (!l) return; mapSel = mapSel?.key === l ? null : { kind: l === "__remote" ? "remote" : "place", key: l }; drawMap(); });
+$("map-clear").addEventListener("click", () => { mapSel = null; drawMap(); });
+["map-layer", "map-visa", "map-industry"].forEach((id) => $(id).addEventListener("input", () => { mapSel = null; drawMap(); }));
+// ----- My info (read-only view of profile.yaml) -----
+(function info() {
+  const I = D.info; if (!I) return;
+  $("info-path").textContent = I.path;
+  const gaps = I.sections.flatMap((s) => s.fields).filter(([, v]) => !v).length;
+  $("info-gaps").textContent = gaps ? `${gaps} fields are empty: forms that ask for them stop and ask you.` : "Every field is filled in.";
+  $("info-sections").innerHTML = I.sections.map((s) => `<section class="card"><h2>${esc(s.title)}</h2><dl class="info">${s.fields.map(([l, v]) =>
+    `<dt>${esc(l)}</dt><dd class="${v ? "" : "unset"}">${v ? esc(v) : "Not set"}</dd>`).join("")}</dl></section>`).join("");
+  const qa = I.custom.map(([q, a]) => [q, a, "profile.yaml"]).concat(I.saved.map((s) => [s.question, s.answer, s.source === "ai" ? "written by an AI" : "saved by you"]));
+  $("info-saved").innerHTML = (qa.length ? `<div class="wrap"><table class="table"><thead><tr><th>Question</th><th>Answer</th><th class="hide-sm">From</th></tr></thead><tbody>${qa.map(([q, a, f]) =>
+    `<tr><td>${esc(q)}</td><td>${esc(a)}</td><td class="hide-sm muted">${esc(f)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="empty">None yet.</p>`)
+    + (I.per_job ? `<p class="muted" style="margin:10px 0 0">Plus ${I.per_job} answers saved for one job each (used only on that job's form).</p>` : "");
+  const name = (f) => f === "resume.pdf" ? "Resume" : f === "transcript.pdf" ? "Transcript" : /^cover-letter-(.+)\.pdf$/.test(f) ? `Cover letter: ${(jobById[f.slice(13, -4)] || {}).company || f.slice(13, -4)}` : f;
+  const files = I.files.filter((f) => !f.endsWith(".md"));
+  $("info-files").innerHTML = files.length ? `<table class="table"><tbody>${files.map((f) => `<tr><td>${esc(name(f))}</td><td class="muted">${esc(f)}</td></tr>`).join("")}</tbody></table>` : `<p class="empty">No files yet: put your resume at private/files/resume.pdf.</p>`;
+})();
+showTab(location.hash.slice(1));
 </script>
 </body>
 </html>

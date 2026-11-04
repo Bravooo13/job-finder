@@ -50,6 +50,8 @@ def settings() -> dict[str, Any]:
         "headless": False,
         "keep_open_seconds": 0,
         "platforms": None,  # None = every platform whose automation is "full" or "fill"
+        "cover_letters": "required",  # required | always | never
+        "accounts": False,  # make job-site accounts (passwords in the Keychain); the owner's setting
     }
     s.update(_load("settings"))
     return s

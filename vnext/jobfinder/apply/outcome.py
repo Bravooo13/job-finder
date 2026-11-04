@@ -24,7 +24,8 @@ def decide(mode: str, fields: list[dict], *, approved: bool = False, blockers: l
     for f in fields:
         if f.get("required") and not f.get("filled"):
             label = short(f.get("label", ""), 290) or "A required field"
-            needs.append(f"Tick: {label}" if f.get("consent") else f"Attach: {label}" if f.get("type") == "file" else label)
+            opts = f" (choices: {' / '.join(f['options'])})" if f.get("options") and f.get("type") in ("select", "radio", "combobox") else ""
+            needs.append(f"Tick: {label}" if f.get("consent") else f"Attach: {label}" if f.get("type") == "file" else label + opts)
     checks = [f"{short(f.get('label', ''), 70)}: {short(f.get('value', ''), 60) or '(filled)'}{' (AI)' if f.get('ai') else ''}"
               for f in fields if f.get("filled") and (f.get("ai") or f.get("confidence") not in (None, "high"))]
     filled = sum(1 for f in fields if f.get("filled"))

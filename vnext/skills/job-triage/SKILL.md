@@ -7,8 +7,10 @@ description: Sort found jobs for an international (F-1 OPT/CPT) or any candidate
 
 ```bash
 python -m jobfinder jobs --visa friendly --min 60 --status new --limit 40
-python -m jobfinder save JOB_ID       # keep it (queue-able)
+python -m jobfinder save JOB_ID ...   # add to the owner's To apply list
+python -m jobfinder unsave JOB_ID ... # take off the list
 python -m jobfinder dismiss JOB_ID    # never show again
+python -m jobfinder to-apply          # the list, and where each job is
 ```
 
 ## Score (0-100, `jobfinder/match.py`)
@@ -33,5 +35,15 @@ place the owner ruled out; video-only or email-only applications if he doesn't w
 limit already reached (some allow 3 applications in 30 days).
 
 ## Output
-A short list: title, company, place, score, visa, one line on why. If you picked the jobs yourself,
-get the owner's yes before queuing (`auto-apply`).
+A short list: title, company, place, score, visa, one line on why. When you go over jobs with the
+owner, the ones he says yes to go on his **To apply** list (`save`); he can also add and remove
+them himself with the buttons on the dashboard (`python -m jobfinder serve`, tab To apply). For a
+request like "queue ten Chicago jobs", use `jobs --place Chicago --visa friendly --type internship
+--min 75 --status new`, read them, and `save` the ten you'd pick.
+
+## Picking for him
+When he asks you to apply to jobs you think fit (his list is empty, or he says so), pick them
+yourself with the rules above: visa-friendly (prefer known H-1B sponsors, `jobs --visa h1b`), his
+level and places, score >= 75, read each description, at most two roles per company and about 10
+per round. `save` your picks so they show on his list, then queue them (`auto-apply`) without
+waiting for a yes, and tell him what you picked and why in your report.
